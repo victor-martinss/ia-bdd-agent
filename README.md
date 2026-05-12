@@ -1,4 +1,4 @@
-Desenvolvido por Victor Martins da Silva
+Desenvolvido por Victor Martins
 
 # qa-ai-agent
 
