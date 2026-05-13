@@ -6,7 +6,8 @@
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
-    { "key": "baseUrl", "value": "http://localhost:3050" }
+    { "key": "baseUrl", "value": "http://localhost:3050" },
+    { "key": "crmItemId", "value": "0" }
   ],
   "item": [
     {
@@ -33,7 +34,7 @@
         "method": "POST",
         "header": [],
         "url": "{{baseUrl}}/bdd/from-fixture/chamado-completo",
-        "description": "Usa um cenário pré-cadastrado (defeito + passos)."
+        "description": "Usa um cenário pré-cadastrado (defeito + passos). Corpo JSON opcional: `{\"itemId\": 123}` para gravar o BDD no CRM no item 123."
       }
     },
     {
@@ -93,7 +94,22 @@
           "raw": "{\n  \"title\": \"Checkout — cupom inválido\",\n  \"item\": {\n    \"id\": 100,\n    \"title\": \"Checkout — cupom inválido\",\n    \"ufCrm94NgfTitulo\": \"Cupom não aplicado no resumo\",\n    \"ufCrm94NgfDescricaoDoOcorrido\": \"Ao informar cupom expirado, o carrinho não exibe mensagem de erro.\",\n    \"ufCrm94NgfPassosParaReproduzir\": \"Adicionar produto. Abrir resumo. Informar cupom expirado. Clicar em aplicar.\",\n    \"ufCrm94NgfResultadoEsperado\": \"Mensagem informando que o cupom é inválido ou expirado.\",\n    \"ufCrm94NgfResultadoObtido\": \"Nada acontece; valor permanece sem desconto e sem feedback.\"\n  }\n}"
         },
         "url": "{{baseUrl}}/bdd/from-item",
-        "description": "Envia qualquer objeto no formato do item do CRM (`item` obrigatório). `title` é opcional (usa `item.title` se omitido)."
+        "description": "Envia qualquer objeto no formato do item do CRM (`item` obrigatório). `title` é opcional. Opcional: `itemId` (ou `crmItemId`) para gravar o BDD no campo `ufCrm94CenariosQa` via `crm.item.update`; `pushToCrm: false` evita a gravação."
+      }
+    },
+    {
+      "name": "BDD — from-item + gravar no CRM",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"Checkout — cupom inválido\",\n  \"itemId\": {{crmItemId}},\n  \"item\": {\n    \"id\": {{crmItemId}},\n    \"title\": \"Checkout — cupom inválido\",\n    \"ufCrm94NgfTitulo\": \"Cupom não aplicado no resumo\",\n    \"ufCrm94NgfDescricaoDoOcorrido\": \"Ao informar cupom expirado, o carrinho não exibe mensagem de erro.\",\n    \"ufCrm94NgfPassosParaReproduzir\": \"Adicionar produto. Abrir resumo. Informar cupom expirado. Clicar em aplicar.\",\n    \"ufCrm94NgfResultadoEsperado\": \"Mensagem informando que o cupom é inválido ou expirado.\",\n    \"ufCrm94NgfResultadoObtido\": \"Nada acontece; valor permanece sem desconto e sem feedback.\"\n  }\n}"
+        },
+        "url": "{{baseUrl}}/bdd/from-item",
+        "description": "Ajuste a variável de coleção `crmItemId` para o ID do item no Bitrix. Resposta inclui `crmPush`."
       }
     }
   ]

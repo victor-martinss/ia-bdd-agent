@@ -39,6 +39,14 @@ function buildStructuredBdd(title, ctx) {
     }
     out.push('      """');
   }
+  if (ctx.cenariosTesteDev) {
+    out.push('    E o time de desenvolvimento documentou estes cenários de teste:');
+    out.push('      """');
+    for (const line of ctx.cenariosTesteDev.split(/\r?\n/)) {
+      out.push(line);
+    }
+    out.push('      """');
+  }
   out.push(...passosParaSteps(ctx.passos));
   if (ctx.resultadoEsperado) {
     out.push(`  Então ${ctx.resultadoEsperado}`);

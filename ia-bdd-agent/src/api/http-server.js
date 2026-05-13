@@ -2,9 +2,31 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { generateBDD } = require('../agents/bdd.agent');
+const { pushBddToCrmCenariosQa } = require('../services/push-bdd-to-crm');
+const { pushBddToLinkedBitrixTasks } = require('../services/push-bdd-to-linked-tasks');
 
 const FIXTURES_PATH = path.join(__dirname, '../../fixtures/bdd-scenarios.json');
 const MAX_BODY = 2 * 1024 * 1024;
+
+/**
+ * @param {Record<string, unknown>} body
+ * @returns {null | { id: number } | { error: string }}
+ */
+function parseOptionalItemId(body) {
+  if (!body || typeof body !== 'object') return null;
+  const raw = body.itemId ?? body.crmItemId;
+  if (raw == null || raw === '') return null;
+  const n =
+    typeof raw === 'number' && Number.isFinite(raw)
+      ? raw
+      : Number(String(raw).trim(), 10);
+  if (!Number.isFinite(n) || n <= 0) {
+    return {
+      error: 'itemId (ou crmItemId) deve ser um número inteiro positivo',
+    };
+  }
+  return { id: Math.trunc(n) };
+}
 
 function readJsonBody(req) {
   return new Promise((resolve, reject) => {
@@ -76,11 +98,34 @@ async function handle(req, res) {
       const body = await readJsonBody(req);
       const item = body.item;
       if (!item || typeof item !== 'object') {
-        return sendJson(res, 400, { error: 'body must include "item" (object)' });
+        return sendJson(res, 400, {
+          error: 'body must include "item" (object)',
+        });
+      }
+      const idCheck = parseOptionalItemId(body);
+      if (idCheck && 'error' in idCheck) {
+        return sendJson(res, 400, { error: idCheck.error });
       }
       const title = body.title || item.title || '';
       const bdd = await generateBDD(title, item);
-      return sendJson(res, 200, { bdd, title: title || item.title || null });
+      const payload = { bdd, title: title || item.title || null };
+      if (idCheck && 'id' in idCheck) {
+        if (body.pushToCrm !== false) {
+          payload.crmItemId = idCheck.id;
+          payload.crmPush = await pushBddToCrmCenariosQa(idCheck.id, bdd, {
+            quiet: true,
+            detail: item,
+          });
+        }
+        if (body.pushToLinkedTasks !== false) {
+          payload.linkedTasksPush = await pushBddToLinkedBitrixTasks(
+            idCheck.id,
+            bdd,
+            { quiet: true }
+          );
+        }
+      }
+      return sendJson(res, 200, payload);
     }
 
     const fixtureMatch = u.pathname.match(/^\/bdd\/from-fixture\/([^/]+)\/?$/);
@@ -90,9 +135,36 @@ async function handle(req, res) {
       if (!fx) {
         return sendJson(res, 404, { error: 'fixture not found', fixtureId });
       }
+      const body = await readJsonBody(req);
+      const idCheck = parseOptionalItemId(body);
+      if (idCheck && 'error' in idCheck) {
+        return sendJson(res, 400, { error: idCheck.error });
+      }
       const title = fx.cardTitle || fx.item?.title || '';
       const bdd = await generateBDD(title, fx.item);
-      return sendJson(res, 200, { bdd, title, fixtureId: fx.id, fixtureName: fx.name });
+      const payload = {
+        bdd,
+        title,
+        fixtureId: fx.id,
+        fixtureName: fx.name,
+      };
+      if (idCheck && 'id' in idCheck) {
+        if (body.pushToCrm !== false) {
+          payload.crmItemId = idCheck.id;
+          payload.crmPush = await pushBddToCrmCenariosQa(idCheck.id, bdd, {
+            quiet: true,
+            detail: fx.item,
+          });
+        }
+        if (body.pushToLinkedTasks !== false) {
+          payload.linkedTasksPush = await pushBddToLinkedBitrixTasks(
+            idCheck.id,
+            bdd,
+            { quiet: true }
+          );
+        }
+      }
+      return sendJson(res, 200, payload);
     }
 
     return sendJson(res, 404, {
@@ -115,10 +187,20 @@ function start(port) {
     console.log(`ia-bdd-agent API → http://localhost:${p}`);
     console.log('  GET  /health');
     console.log('  GET  /fixtures');
-    console.log('  POST /bdd/from-item  { "title"?, "item": { ...crm } }');
-    console.log('  POST /bdd/from-fixture/:fixtureId');
+    console.log(
+      '  POST /bdd/from-item  { "title"?, "item", "itemId"?, "pushToCrm"?, "pushToLinkedTasks"? }'
+    );
+    console.log(
+      '  POST /bdd/from-fixture/:fixtureId  body opcional: { "itemId"?, "pushToCrm"?, "pushToLinkedTasks"? }'
+    );
   });
   return server;
 }
 
-module.exports = { start, handle, loadFixtures, FIXTURES_PATH };
+module.exports = {
+  start,
+  handle,
+  loadFixtures,
+  FIXTURES_PATH,
+  parseOptionalItemId,
+};

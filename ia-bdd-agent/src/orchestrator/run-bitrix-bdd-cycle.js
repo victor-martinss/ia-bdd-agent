@@ -1,5 +1,7 @@
 const path = require('path');
 const { getTasks, getTaskDetail } = require('../services/bitrix.service');
+const { pushBddToCrmCenariosQa } = require('../services/push-bdd-to-crm');
+const { pushBddToLinkedBitrixTasks } = require('../services/push-bdd-to-linked-tasks');
 const { generateBDD } = require('../agents/bdd.agent');
 const { initAggregateFile, writeBddArtifacts } = require('../utils/bdd-output');
 
@@ -7,7 +9,7 @@ const { initAggregateFile, writeBddArtifacts } = require('../utils/bdd-output');
  * Busca detalhes, gera BDD e grava arquivos (mesmo fluxo do index.js).
  * @param {string} packageRoot __dirname do pacote ia-bdd-agent
  * @param {{ tasks?: object[] | null, quiet?: boolean }} [options]
- * @returns {Promise<{ processed: number, aggregatePath: string | null, taskIds: (string|number)[] }>}
+ * @returns {Promise<{ processed: number, aggregatePath: string | null, taskIds: (string|number)[], crm: { ok: number, skipped: number, failed: number }, linkedTasks: { updated: number, failed: number } }>}
  */
 async function runBitrixBddCycle(packageRoot, options = {}) {
   const { tasks: tasksInput = null, quiet = false } = options;
@@ -16,7 +18,13 @@ async function runBitrixBddCycle(packageRoot, options = {}) {
 
   if (!tasks.length) {
     if (!quiet) console.log('Nenhuma tarefa encontrada.');
-    return { processed: 0, aggregatePath: null, taskIds: [] };
+    return {
+      processed: 0,
+      aggregatePath: null,
+      taskIds: [],
+      crm: { ok: 0, skipped: 0, failed: 0 },
+      linkedTasks: { updated: 0, failed: 0 },
+    };
   }
 
   const aggregatePath = initAggregateFile(packageRoot);
@@ -32,6 +40,8 @@ async function runBitrixBddCycle(packageRoot, options = {}) {
   }
 
   let processed = 0;
+  const crm = { ok: 0, skipped: 0, failed: 0 };
+  const linkedTasks = { updated: 0, failed: 0 };
   for (const task of tasks) {
     try {
       const detail = await getTaskDetail(task.id);
@@ -55,6 +65,20 @@ async function runBitrixBddCycle(packageRoot, options = {}) {
       if (!quiet && file) {
         console.log(`📄 BDD completo (arquivo): ${file}\n`);
       }
+
+      const crmResult = await pushBddToCrmCenariosQa(task.id, bdd, {
+        quiet,
+        detail,
+      });
+      if (crmResult.ok) crm.ok += 1;
+      else if (crmResult.skipped) crm.skipped += 1;
+      else crm.failed += 1;
+
+      const linkResult = await pushBddToLinkedBitrixTasks(task.id, bdd, {
+        quiet,
+      });
+      linkedTasks.updated += linkResult.updated || 0;
+      linkedTasks.failed += linkResult.failed || 0;
       if (!quiet) {
         console.log(bdd);
         console.log('');
@@ -69,10 +93,24 @@ async function runBitrixBddCycle(packageRoot, options = {}) {
     console.log(`\n✅ Consolidado: ${aggregatePath}`);
   }
 
+  if (!quiet && (crm.ok || crm.skipped || crm.failed)) {
+    console.log(
+      `\n📌 CRM (BDD / Teste Q.A.): ${crm.ok} gravado(s), ${crm.skipped} ignorado(s), ${crm.failed} falha(s)`
+    );
+  }
+
+  if (!quiet && (linkedTasks.updated || linkedTasks.failed)) {
+    console.log(
+      `📎 Tarefas Bitrix atreladas: ${linkedTasks.updated} campo(s) gravado(s), ${linkedTasks.failed} falha(s) em tarefas`
+    );
+  }
+
   return {
     processed,
     aggregatePath,
     taskIds: tasks.map((t) => t.id),
+    crm,
+    linkedTasks,
   };
 }
 
