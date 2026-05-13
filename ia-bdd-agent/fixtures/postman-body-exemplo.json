@@ -1,0 +1,12 @@
+{
+  "title": "Checkout — cupom inválido",
+  "item": {
+    "id": 100,
+    "title": "Checkout — cupom inválido",
+    "ufCrm94NgfTitulo": "Cupom não aplicado no resumo",
+    "ufCrm94NgfDescricaoDoOcorrido": "Ao informar cupom expirado, o carrinho não exibe mensagem de erro.",
+    "ufCrm94NgfPassosParaReproduzir": "Adicionar produto. Abrir resumo. Informar cupom expirado. Clicar em aplicar.",
+    "ufCrm94NgfResultadoEsperado": "Mensagem informando que o cupom é inválido ou expirado.",
+    "ufCrm94NgfResultadoObtido": "Nada acontece; valor permanece sem desconto e sem feedback."
+  }
+}

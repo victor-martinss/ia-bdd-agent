@@ -1,0 +1,100 @@
+{
+  "info": {
+    "_postman_id": "a1b2c3d4-ia-bdd-agent",
+    "name": "ia-bdd-agent API",
+    "description": "Geração de BDD (Gherkin) a partir de payload estilo Bitrix24. Suba o servidor: `cd ia-bdd-agent && npm run api` (porta padrão 3050 ou `PORT` no `.env`).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3050" }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/health",
+        "description": "Verifica se a API está no ar."
+      }
+    },
+    {
+      "name": "Listar massa (fixtures)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/fixtures",
+        "description": "Lista os IDs da massa em `fixtures/bdd-scenarios.json` para usar em `from-fixture`."
+      }
+    },
+    {
+      "name": "BDD — fixture chamado-completo",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": "{{baseUrl}}/bdd/from-fixture/chamado-completo",
+        "description": "Usa um cenário pré-cadastrado (defeito + passos)."
+      }
+    },
+    {
+      "name": "BDD — fixture melhoria-sugerida",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": "{{baseUrl}}/bdd/from-fixture/melhoria-sugerida",
+        "description": "Cenário com campos de melhoria."
+      }
+    },
+    {
+      "name": "BDD — fixture apenas-titulo-card",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": "{{baseUrl}}/bdd/from-fixture/apenas-titulo-card",
+        "description": "NGF vazio/placeholder; geração a partir do título do card."
+      }
+    },
+    {
+      "name": "BDD — fixture legacy-detail-text",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": "{{baseUrl}}/bdd/from-fixture/legacy-detail-text",
+        "description": "Item com DETAIL_TEXT (legado)."
+      }
+    },
+    {
+      "name": "BDD — fixture checkout-cupom",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": "{{baseUrl}}/bdd/from-fixture/checkout-cupom",
+        "description": "E-commerce — cupom inválido (massa bdd-scenarios.json)."
+      }
+    },
+    {
+      "name": "BDD — fixture observacoes-triagem",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": "{{baseUrl}}/bdd/from-fixture/observacoes-triagem",
+        "description": "Descrição + observações triagem QA."
+      }
+    },
+    {
+      "name": "BDD — payload manual (from-item)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"Checkout — cupom inválido\",\n  \"item\": {\n    \"id\": 100,\n    \"title\": \"Checkout — cupom inválido\",\n    \"ufCrm94NgfTitulo\": \"Cupom não aplicado no resumo\",\n    \"ufCrm94NgfDescricaoDoOcorrido\": \"Ao informar cupom expirado, o carrinho não exibe mensagem de erro.\",\n    \"ufCrm94NgfPassosParaReproduzir\": \"Adicionar produto. Abrir resumo. Informar cupom expirado. Clicar em aplicar.\",\n    \"ufCrm94NgfResultadoEsperado\": \"Mensagem informando que o cupom é inválido ou expirado.\",\n    \"ufCrm94NgfResultadoObtido\": \"Nada acontece; valor permanece sem desconto e sem feedback.\"\n  }\n}"
+        },
+        "url": "{{baseUrl}}/bdd/from-item",
+        "description": "Envia qualquer objeto no formato do item do CRM (`item` obrigatório). `title` é opcional (usa `item.title` se omitido)."
+      }
+    }
+  ]
+}

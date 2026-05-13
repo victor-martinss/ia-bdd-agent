@@ -1,0 +1,10 @@
+Baseado nos cenários abaixo, gere código Cypress completo.
+
+Regras:
+- Usar describe e it
+- Usar boas práticas
+- Separar cenários
+- Validar mensagens
+
+Cenários:
+{{CENARIOS}}

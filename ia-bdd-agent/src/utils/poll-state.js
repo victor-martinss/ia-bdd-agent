@@ -1,0 +1,41 @@
+const fs = require('fs');
+const path = require('path');
+
+function stateFilePath(packageRoot) {
+  const custom = process.env.BDD_POLL_STATE_FILE;
+  if (custom && String(custom).trim()) {
+    const s = String(custom).trim();
+    return path.isAbsolute(s) ? s : path.join(packageRoot, s);
+  }
+  return path.join(packageRoot, 'output', 'poll-state.json');
+}
+
+function loadPollState(packageRoot) {
+  const p = stateFilePath(packageRoot);
+  try {
+    if (!fs.existsSync(p)) {
+      return { processedIds: [], lastPollAt: null, lastNewTaskIds: [] };
+    }
+    const data = JSON.parse(fs.readFileSync(p, 'utf8'));
+    return {
+      processedIds: Array.isArray(data.processedIds) ? data.processedIds.map(Number) : [],
+      lastPollAt: data.lastPollAt || null,
+      lastNewTaskIds: Array.isArray(data.lastNewTaskIds) ? data.lastNewTaskIds : [],
+    };
+  } catch {
+    return { processedIds: [], lastPollAt: null, lastNewTaskIds: [] };
+  }
+}
+
+function savePollState(packageRoot, state) {
+  const p = stateFilePath(packageRoot);
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  const out = {
+    processedIds: state.processedIds,
+    lastPollAt: state.lastPollAt,
+    lastNewTaskIds: state.lastNewTaskIds || [],
+  };
+  fs.writeFileSync(p, JSON.stringify(out, null, 2), 'utf8');
+}
+
+module.exports = { loadPollState, savePollState, stateFilePath };
