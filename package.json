@@ -1,11 +1,22 @@
 {
   "name": "qa-ai-agent",
   "version": "1.0.0",
-  "description": "",
+  "description": "Monorepo com ia-bdd-agent: Bitrix24 → cenários BDD (Gherkin); ver README.md.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/victor-martinss/ia-bdd-agent.git"
+  },
+  "bugs": {
+    "url": "https://github.com/victor-martinss/ia-bdd-agent/issues"
+  },
+  "homepage": "https://github.com/victor-martinss/ia-bdd-agent#readme",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "bdd": "node ia-bdd-agent/index.js"
+    "bdd": "node ia-bdd-agent/index.js",
+    "poll": "node ia-bdd-agent/poll.js",
+    "api": "node ia-bdd-agent/api-server.js",
+    "test:api": "node ia-bdd-agent/scripts/run-api-fixtures.js"
   },
   "keywords": [],
   "author": "",

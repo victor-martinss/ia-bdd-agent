@@ -8,7 +8,7 @@ Repositório de automação e QA. O pacote **`ia-bdd-agent`** (pasta `ia-bdd-age
 
 ---
 
-## Descrição
+## Descrição (GitHub / resumo)
 
 **Em uma linha:** agente que transforma chamados do Bitrix24 em cenários BDD (Gherkin), com opção de LLM (Ollama).
 

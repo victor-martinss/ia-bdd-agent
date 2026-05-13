@@ -1,0 +1,22 @@
+# Dependências
+node_modules/
+ia-bdd-agent/node_modules/
+
+# Segredos e ambiente local
+.env
+.env.*
+!.env.example
+ia-bdd-agent/.env
+ia-bdd-agent/.env.*
+
+# Saída gerada pelo agente
+output/
+ia-bdd-agent/output/
+ia-bdd-agent/outputs/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+*.log
+.idea/
+.vscode/
