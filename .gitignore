@@ -8,6 +8,7 @@ ia-bdd-agent/node_modules/
 !.env.example
 ia-bdd-agent/.env
 ia-bdd-agent/.env.*
+!ia-bdd-agent/.env.example
 
 # Saída gerada pelo agente (pasta singular usada pelo fluxo BDD atual)
 output/
