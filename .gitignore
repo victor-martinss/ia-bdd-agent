@@ -9,10 +9,9 @@ ia-bdd-agent/node_modules/
 ia-bdd-agent/.env
 ia-bdd-agent/.env.*
 
-# Saída gerada pelo agente
+# Saída gerada pelo agente (pasta singular usada pelo fluxo BDD atual)
 output/
 ia-bdd-agent/output/
-ia-bdd-agent/outputs/
 
 # OS / IDE
 .DS_Store
