@@ -40,7 +40,7 @@ O foco é **reduzir retrabalho manual** e manter **formato previsível** entre c
 - **Fila QA:** o agente processa cards nas colunas de **teste/QA** em **todas as categorias (squads)** do SPA, não só na categoria padrão. Configure **`BITRIX_QA_STAGE_NAMES`** (recomendado) ou **`BITRIX_STAGE_NAME`** (legado). No Mobilemed os nomes costumam ser **Teste de Q.A.**, **Testes de Q.A.** e **Pronto para teste** (além de *Novo Teste*, se existir no seu funil).
 - Comando auxiliar: **`npm run bitrix:context`** (lista SPA, categorias e `STAGE_ID` de cada coluna).
 - Opcional: o mesmo BDD pode ser gravado em **tarefas Bitrix** atreladas ao card (`UF_CRM_TASK`); o webhook precisa incluir permissões de **CRM** e de **tarefas** (*task*). Ver **`BITRIX_TASK_UF_BDD_FIELD`** e **`BITRIX_PUSH_BDD_TO_LINKED_TASKS`**.
-- **Somente QA no CRM:** cenários são gravados em **`ufCrm94CenariosQa`** (ou campo configurado). O agente **não grava** em **`ufCrm94CenariosDeTesteDev`** nem em cards em colunas de **desenvolvimento** (ex.: *Em Desenvolvimento*, *Testes em Desenvolvimento*), salvo **`BITRIX_PUSH_BDD_ON_DEV_CARD=1`**.
+- **Somente QA no CRM:** cenários vão para o campo definido em **`BITRIX_UF_BDD_FIELD`** (ex.: **`ufCrm100CenariosQa`** no SPA `type/1294/…`, **`ufCrm94CenariosQa`** no NGF `1276`). O agente **não grava** em campos *Dev* nem em cards em colunas de **desenvolvimento**, salvo **`BITRIX_PUSH_BDD_ON_DEV_CARD=1`**.
 
 ---
 
@@ -80,7 +80,7 @@ O foco é **reduzir retrabalho manual** e manter **formato previsível** entre c
 | Modo | Comando | Comportamento |
 |------|---------|----------------|
 | **Única rodada** | `npm run bdd` / `npm start` | Processa **todos os cards da fila QA** (colunas configuradas em `BITRIX_QA_STAGE_NAMES`) → BDD → CRM + tarefas atreladas + `output/`. |
-| **Um card** | `npm run bdd:item -- <id>` | Gera e grava BDD para um **item CRM** específico (ignora `poll-state`). |
+| **Um card** | `npm run bdd:item -- <id> [entityTypeId]` | Gera e grava BDD para um item CRM (ignora `poll-state`). Use o `entityTypeId` da URL (`type/1294/…`). Ex.: `npm run bdd:item -- 1110 1294` |
 | **Contínua** | `npm run poll` | A cada **15 minutos** (ou `BDD_POLL_INTERVAL_MINUTES`), consulta a fila QA, compara com `processedIds` em **`poll-state.json`** e gera BDD **apenas para IDs novos**. |
 | **API** | `npm run api` | Gera BDD a partir de JSON (Postman, integrações, massa) sem chamar o Bitrix. |
 | **Diagnóstico** | `npm run bitrix:diagnose-linked -- <id>` | Lista vínculos CRM → tarefas Bitrix e UFs candidatos para um card. |
@@ -176,15 +176,14 @@ BITRIX_WEBHOOK=https://SEU_DOMINIO.bitrix24.com.br/rest/USER/TOKEN
 # Fila QA (todas as categorias/squads do SPA):
 BITRIX_QA_STAGE_NAMES=Novo Teste,Teste de Q.A,Testes de Q.A,Pronto para teste
 # (legado) BITRIX_STAGE_NAME=Novo Teste
-# Colunas de desenvolvimento (não recebem ufCrm94CenariosQa):
+# Colunas de desenvolvimento (não recebem cenários no campo QA):
 # BITRIX_DEV_STAGE_NAMES=Em Desenvolvimento,Testes em Desenvolvimento
 # Símbolo do SPA se crm.type.list falhar (ACCESS_DENIED):
 # BITRIX_SYMBOL_CODE_SHORT=T1276
 # (opcional) BITRIX_CATEGORY_ID=0
 # Filtro manual da lista: BITRIX_LIST_FILTER_JSON={"STAGE_ID":"DT..."}
-# BITRIX_UF_BDD_FIELD=ufCrm94TesteQa
-# (ou) BITRIX_UF_TESTE_QA=ufCrm94TesteQa
-# BITRIX_UF_CENARIOS_QA=ufCrm94CenariosQa
+# BITRIX_UF_BDD_FIELD=ufCrm100CenariosQa,ufCrm94CenariosQa
+# (ou) BITRIX_UF_TESTE_QA / BITRIX_UF_CENARIOS_QA
 # BITRIX_LIST_PAGE_SIZE=100
 # BITRIX_DEBUG_REST=1
 # BDD_CENARIOS_UF_MAX_CHARS=60000
@@ -200,15 +199,15 @@ BITRIX_QA_STAGE_NAMES=Novo Teste,Teste de Q.A,Testes de Q.A,Pronto para teste
 
 **CRM:** use **`BITRIX_ENTITY_TYPE_ID`** para o SPA correto, ou **`BITRIX_SMART_PROCESS_TITLE`**. A **fila processada** (`bdd`, `poll`) usa **`BITRIX_QA_STAGE_NAMES`**: o código resolve os `STAGE_ID` em **todas as categorias** (Squad Sustentação, Core, DICOM, etc.). Filtro manual: **`BITRIX_LIST_FILTER_JSON`**. Liste colunas com **`npm run bitrix:context`**.
 
-**Campo no CRM (BDD / “Teste Q.A.” / “Cenários QA”):** o texto Gherkin é gravado com **`crm.item.update`**. Defina o código REST do campo com **`BITRIX_UF_BDD_FIELD`** (ou **`BITRIX_UF_TESTE_QA`** / **`BITRIX_UF_CENARIOS_QA`**). Se não definir, o agente **procura no item** chaves `ufCrm*` que combinem com **“teste”+“qa”** ou **“cenário”+“qa”** (prioridade para *Teste Q.A.*). Fallback: `ufCrm94TesteQa`, depois `ufCrm94CenariosQa`. Vários códigos separados por vírgula são tentados em ordem. Lista **paginada** (`BITRIX_LIST_PAGE_SIZE`). Atualização **JSON** com retry **form-urlencoded**. **`BITRIX_DEBUG_REST=1`**: log REST. **`BITRIX_PUSH_BDD_TO_UF=0`**: não grava.
+**Campo no CRM (BDD / “Teste Q.A.” / “Cenários QA”):** o texto Gherkin é gravado com **`crm.item.update`**. Defina o código REST com **`BITRIX_UF_BDD_FIELD`** (ou **`BITRIX_UF_TESTE_QA`** / **`BITRIX_UF_CENARIOS_QA`**). Exemplos: SPA **1294** → `ufCrm100CenariosQa`; SPA **1276** (NGF) → `ufCrm94CenariosQa`. Para operar nos dois, use lista: **`BITRIX_UF_BDD_FIELD=ufCrm100CenariosQa,ufCrm94CenariosQa`**. Se não definir, o agente **descobre** chaves `ufCrm*` no item; fallback interno tenta `ufCrm100*` e `ufCrm94*`. Vários códigos separados por vírgula são tentados em ordem. Lista **paginada** (`BITRIX_LIST_PAGE_SIZE`). **`BITRIX_DEBUG_REST=1`**: log REST. **`BITRIX_PUSH_BDD_TO_UF=0`**: não grava.
 
 **Onde o BDD é gravado no CRM**
 
 | Destino | Campo | Quando |
 |---------|--------|--------|
-| Card na **coluna QA** | `ufCrm94CenariosQa` (`BITRIX_UF_BDD_FIELD`) | Card está em estágio QA (Teste de Q.A., etc.) |
+| Card na **coluna QA** | `ufCrm100CenariosQa` ou `ufCrm94CenariosQa` (conforme `BITRIX_UF_BDD_FIELD`) | Card está em estágio QA (Teste de Q.A., etc.) |
 | Card **Dev** | — | **Não grava** (evita cenários na tarefa de desenvolvimento) |
-| Outro card QA **vinculado** (mesmo id externo/chamado) | `ufCrm94CenariosQa` | `push-bdd-to-qa-linked-crm.js` |
+| Outro card QA **vinculado** (mesmo id externo/chamado) | mesmo campo QA configurado | `push-bdd-to-qa-linked-crm.js` |
 
 **Tarefas Bitrix atreladas:** após gravar no card QA, o agente tenta copiar o BDD para **tarefas** com **`UF_CRM_TASK`** apontando para o item (`tasks.task.list` / `update`). Configure **`BITRIX_SYMBOL_CODE_SHORT`** se `crm.type.list` retornar `ACCESS_DENIED`. Vínculo: **`BITRIX_UF_CRM_TASK_VALUE={{symbol}}_{{id}}`**. Campo na tarefa: **`BITRIX_TASK_UF_BDD_FIELD`** ou descoberta automática. Desligar: **`BITRIX_PUSH_BDD_TO_LINKED_TASKS=0`**.
 
@@ -229,8 +228,8 @@ BITRIX_QA_STAGE_NAMES=Novo Teste,Teste de Q.A,Testes de Q.A,Pronto para teste
 
 | Comando | O que faz |
 |---------|-----------|
-| `npm run bdd` | Lista **fila QA** → BDD → **ufCrm94CenariosQa** + tarefas atreladas + `output/` |
-| `npm run bdd:item -- <id>` | Um card CRM (ex.: `npm run bdd:item -- 222`) |
+| `npm run bdd` | Lista **fila QA** → BDD → campo **`BITRIX_UF_BDD_FIELD`** + tarefas atreladas + `output/` |
+| `npm run bdd:item -- <id> [entityTypeId]` | Um card CRM (ex.: `222` ou `1110 1294`) |
 | `npm run bdd:crm-sync` | Todos os itens da fila QA → BDD → CRM; atualiza `poll-state.json` |
 | `npm run poll` | A cada **15 min**: só IDs novos na fila QA → BDD + CRM + estado |
 | `npm run api` | API HTTP (padrão `http://localhost:3050`) |
@@ -294,7 +293,7 @@ Resposta 200: `bdd`, `title`; se CRM: `crmItemId`, `crmPush`; se tarefas: **`lin
 3. `parser.js` monta contexto a partir dos campos NGF (e legados como `DETAIL_TEXT`).
 4. `bdd.agent.js` gera Gherkin estruturado ou, com `BDD_USE_LLM=1`, chama Ollama usando `prompts/bdd.txt`.
 5. `bdd-output.js` grava `.feature` e consolidado (se não estiver desligado).
-6. `push-bdd-to-crm.js` grava em **`ufCrm94CenariosQa`** só em cards **QA**; **`push-bdd-to-qa-linked-crm.js`** replica em outros cards QA vinculados; **`push-bdd-to-linked-tasks.js`** replica nas **tarefas Bitrix** (`UF_CRM_TASK`).
+6. `push-bdd-to-crm.js` grava no campo QA (`BITRIX_UF_BDD_FIELD`) só em cards **QA**; **`push-bdd-to-qa-linked-crm.js`** replica em outros cards QA vinculados; **`push-bdd-to-linked-tasks.js`** replica nas **tarefas Bitrix** (`UF_CRM_TASK`).
 
 ---
 
