@@ -207,7 +207,8 @@ async function fetchStatusesForSpa(entityIdForStatus) {
 }
 
 /**
- * Monta objeto filter para crm.item.list (coluna "Novo Teste", etc.).
+ * Monta objeto filter para crm.item.list (colunas QA: Teste de Q.A., Novo Teste, etc.).
+ * Busca estágios em **todas** as categorias do SPA (squads), não só na categoria padrão.
  * @param {number} entityTypeIdNum
  */
 async function buildItemListFilter(entityTypeIdNum) {
@@ -217,51 +218,50 @@ async function buildItemListFilter(entityTypeIdNum) {
     return fromEnv;
   }
 
-  const stageNames = (
-    process.env.BITRIX_STAGE_NAMES ||
-    process.env.BITRIX_STAGE_NAME ||
-    ''
-  )
-    .split(/[,;]+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-
-  if (!stageNames.length) return {};
-
-  const categoryId = await resolveDefaultCategoryId(entityTypeIdNum);
-  const entityIdForStatus = `DYNAMIC_${entityTypeIdNum}_STAGE_${categoryId}`;
-  const statuses = await fetchStatusesForSpa(entityIdForStatus);
-  const matched = [];
-  for (const st of statuses) {
-    const name = String(st.NAME || st.name || '').trim();
-    const sid = st.STATUS_ID || st.statusId;
-    if (!sid) continue;
-    for (const needle of stageNames) {
-      const nl = needle.toLowerCase();
-      if (name.toLowerCase().includes(nl) || nl === name.toLowerCase()) {
-        matched.push(String(sid));
-        break;
-      }
-    }
-  }
+  const { resolveQaStageIds, qaStageNameNeedles, buildStageFilter } = require('./crm-qa-stages');
+  const matched = await resolveQaStageIds(entityTypeIdNum);
 
   if (!matched.length) {
     console.warn(
-      `[Bitrix] Nenhum estágio encontrado para nome(s): ${stageNames.join(', ')} (ENTITY_ID=${entityIdForStatus}). Liste estágios com: npm run bitrix:context`
+      `[Bitrix] Nenhuma coluna QA encontrada para: ${qaStageNameNeedles().join(', ')}. Ajuste BITRIX_QA_STAGE_NAMES ou BITRIX_STAGE_NAME.`
     );
     return {};
   }
 
   console.log(
-    `[Bitrix] Filtro de estágio/coluna → STAGE_ID: ${matched.join(', ')}`
+    `[Bitrix] Fila QA (${qaStageNameNeedles().join(', ')}) → ${matched.length} estágio(s)`
   );
-  if (matched.length === 1) return { STAGE_ID: matched[0] };
-  return { '@STAGE_ID': matched };
+  return { __qaStageIds: matched, ...buildStageFilter(matched) };
 }
 
 /**
  * Lista itens do SPA (paginado). Usa POST com JSON para suportar `filter` (estágio/coluna).
  */
+async function fetchCrmItemsPage(etId, filter, start, limit) {
+  const url = `${BASE_URL}/crm.item.list`;
+  const body = { entityTypeId: etId, start, limit };
+  if (filter && Object.keys(filter).length) body.filter = filter;
+
+  let response;
+  try {
+    response = await axios.post(url, body, {
+      headers: { 'Content-Type': 'application/json' },
+      validateStatus: (s) => s >= 200 && s < 500,
+    });
+  } catch {
+    response = await axios.get(url, {
+      params: { entityTypeId: etId, start, limit, ...flattenFilterForGet(filter) },
+      validateStatus: (s) => s >= 200 && s < 500,
+    });
+  }
+
+  const msg = restErrorMessage(response.data);
+  if (response.status >= 400 || msg) {
+    throw new Error(msg || `HTTP ${response.status}`);
+  }
+  return (response.data.result && response.data.result.items) || [];
+}
+
 async function getTasks() {
   if (!BASE_URL) {
     throw new Error('BITRIX_WEBHOOK não definido');
@@ -270,47 +270,48 @@ async function getTasks() {
   const etId = await getEntityTypeId();
   const filter = await buildItemListFilter(etId);
   const limit = listPageSize();
+
+  const qaStageIds = filter && filter.__qaStageIds;
+  const cleanFilter = filter ? { ...filter } : {};
+  delete cleanFilter.__qaStageIds;
+
+  if (Array.isArray(qaStageIds) && qaStageIds.length > 1) {
+    const byId = new Map();
+    for (const stageId of qaStageIds) {
+      let start = 0;
+      for (;;) {
+        try {
+          const items = await fetchCrmItemsPage(etId, { stageId }, start, limit);
+          for (const it of items) {
+            const id = it.id ?? it.ID;
+            if (id != null) byId.set(String(id), it);
+          }
+          if (items.length < limit) break;
+          start += limit;
+          if (start > 200000) break;
+        } catch (e) {
+          if (process.env.DEBUG_BITRIX === '1') {
+            console.warn(`[Bitrix] crm.item.list stageId=${stageId}:`, e.message || e);
+          }
+          break;
+        }
+      }
+    }
+    return [...byId.values()];
+  }
+
   const allItems = [];
   let start = 0;
-  const url = `${BASE_URL}/crm.item.list`;
+  const useFilter =
+    Object.keys(cleanFilter).length > 0 ? cleanFilter : null;
 
   for (;;) {
-    const body = {
-      entityTypeId: etId,
-      start,
-      limit,
-    };
-    if (filter && Object.keys(filter).length) body.filter = filter;
-
-    let response;
+    let items;
     try {
-      response = await axios.post(url, body, {
-        headers: { 'Content-Type': 'application/json' },
-      });
-    } catch {
-      const flat = {
-        entityTypeId: etId,
-        start,
-        limit,
-        ...flattenFilterForGet(filter),
-      };
-      response = await axios.get(url, { params: flat });
+      items = await fetchCrmItemsPage(etId, useFilter, start, limit);
+    } catch (e) {
+      throw new Error(`crm.item.list: ${e.message || e}`);
     }
-
-    let msg = restErrorMessage(response.data);
-    if (msg) {
-      const flat = {
-        entityTypeId: etId,
-        start,
-        limit,
-        ...flattenFilterForGet(filter),
-      };
-      response = await axios.get(url, { params: flat });
-      msg = restErrorMessage(response.data);
-      if (msg) throw new Error(msg);
-    }
-
-    const items = (response.data.result && response.data.result.items) || [];
     allItems.push(...items);
     if (items.length < limit) break;
     start += limit;
@@ -328,9 +329,9 @@ function flattenFilterForGet(filter) {
   if (!filter || typeof filter !== 'object') return {};
   const out = {};
   for (const [k, v] of Object.entries(filter)) {
-    if (k === '@STAGE_ID' && Array.isArray(v)) {
+    if ((k === '@STAGE_ID' || k === '@stageId') && Array.isArray(v)) {
       v.forEach((id, i) => {
-        out[`filter[@STAGE_ID][${i}]`] = id;
+        out[`filter[@stageId][${i}]`] = id;
       });
     } else if (v != null && typeof v === 'object' && !Array.isArray(v)) {
       for (const [k2, v2] of Object.entries(v)) {

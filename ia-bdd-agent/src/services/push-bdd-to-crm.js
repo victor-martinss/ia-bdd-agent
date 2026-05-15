@@ -5,9 +5,20 @@ const { updateCrmItemFields } = require('./bitrix.service');
  * ("Cenários QA", "Teste Q.A", etc.).
  * @param {string} k
  */
+function isDevOnlyBddFieldKey(k) {
+  const lower = k.toLowerCase();
+  const compact = lower.replace(/[^a-z0-9]/g, '');
+  if (compact.includes('testedev') || compact.includes('cenariosdetestedev')) return true;
+  if (lower.includes('dev') && lower.includes('cenario') && lower.includes('teste')) {
+    return true;
+  }
+  return false;
+}
+
 function matchesBddQaFieldKey(k) {
   const lower = k.toLowerCase();
   if (!(k.startsWith('ufCrm') || k.startsWith('UF_CRM'))) return false;
+  if (isDevOnlyBddFieldKey(k)) return false;
   const compact = lower.replace(/[^a-z0-9]/g, '');
   if (compact.includes('testeqa')) return true;
   if (lower.includes('teste') && lower.includes('qa')) return true;

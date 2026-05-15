@@ -1,10 +1,10 @@
 const path = require('path');
 const { getTasks, getTaskDetail } = require('../services/bitrix.service');
 const { pushBddToCrmCenariosQa } = require('../services/push-bdd-to-crm');
-const {
-  pushBddToLinkedBitrixTasks,
-  pushBddToLinkedCrmChildItems,
-} = require('../services/push-bdd-to-linked-tasks');
+const { pushBddToLinkedBitrixTasks } = require('../services/push-bdd-to-linked-tasks');
+const { pushBddToQaLinkedCrmItems } = require('../services/push-bdd-to-qa-linked-crm');
+const { isQaStageId, isDevStageId } = require('../services/crm-qa-stages');
+const { getEntityTypeId } = require('../services/bitrix.service');
 const { generateBDD } = require('../agents/bdd.agent');
 const { initAggregateFile, writeBddArtifacts } = require('../utils/bdd-output');
 
@@ -69,13 +69,41 @@ async function runBitrixBddCycle(packageRoot, options = {}) {
         console.log(`📄 BDD completo (arquivo): ${file}\n`);
       }
 
-      const crmResult = await pushBddToCrmCenariosQa(task.id, bdd, {
+      const etId = await getEntityTypeId();
+      const stageId = detail && (detail.stageId || detail.STAGE_ID);
+      const inQa = stageId ? await isQaStageId(String(stageId), etId) : true;
+      const inDev = stageId ? await isDevStageId(String(stageId), etId) : false;
+
+      if (inQa || process.env.BITRIX_PUSH_BDD_ON_DEV_CARD === '1') {
+        const crmResult = await pushBddToCrmCenariosQa(task.id, bdd, {
+          quiet,
+          detail,
+        });
+        if (crmResult.ok) crm.ok += 1;
+        else if (crmResult.skipped) crm.skipped += 1;
+        else crm.failed += 1;
+      } else if (!quiet && inDev) {
+        console.log(
+          `[CRM] item ${task.id}: coluna de desenvolvimento — cenários não gravados neste card (apenas em cards QA / ufCrm94CenariosQa).`
+        );
+        crm.skipped += 1;
+      }
+
+      const qaLinkResult = await pushBddToQaLinkedCrmItems(task.id, bdd, {
         quiet,
         detail,
       });
-      if (crmResult.ok) crm.ok += 1;
-      else if (crmResult.skipped) crm.skipped += 1;
-      else crm.failed += 1;
+      linkedTasks.updated += qaLinkResult.updated || 0;
+      if (qaLinkResult.failed) linkedTasks.failed += qaLinkResult.failed;
+      if (!quiet) {
+        if (qaLinkResult.updated) {
+          console.log(
+            `📎 Cards QA vinculados: ${qaLinkResult.updated} gravado(s) — IDs ${(qaLinkResult.itemIds || []).join(', ')}`
+          );
+        } else if (qaLinkResult.skipped && qaLinkResult.reason) {
+          console.log(`📎 Cards QA vinculados: ${qaLinkResult.reason}`);
+        }
+      }
 
       const linkResult = await pushBddToLinkedBitrixTasks(task.id, bdd, {
         quiet,
@@ -93,20 +121,6 @@ async function runBitrixBddCycle(packageRoot, options = {}) {
             `📎 Tarefas Bitrix: ${linkResult.updated} gravada(s) — IDs ${(linkResult.taskIds || []).join(', ')}`
           );
         }
-      }
-
-      const childCrmResult = await pushBddToLinkedCrmChildItems(task.id, bdd, {
-        quiet,
-        detail,
-      });
-      linkedTasks.updated += childCrmResult.updated || 0;
-      if (childCrmResult.failed) {
-        linkedTasks.failed += childCrmResult.failed;
-      }
-      if (!quiet && childCrmResult.updated) {
-        console.log(
-          `📎 Itens CRM filhos: ${childCrmResult.updated} gravado(s) — IDs ${(childCrmResult.itemIds || []).join(', ')}`
-        );
       }
       if (!quiet) {
         console.log(bdd);

@@ -10,9 +10,11 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
+    "bdd": "node index.js",
     "poll": "node poll.js",
     "api": "node api-server.js",
     "bdd:crm-sync": "node scripts/sync-bdd-to-bitrix-once.js",
+    "bdd": "node index.js",
     "bdd:item": "node scripts/run-bdd-item.js",
     "bitrix:context": "node scripts/bitrix-show-context.js",
     "bitrix:diagnose-linked": "node scripts/diagnose-linked-tasks.js",

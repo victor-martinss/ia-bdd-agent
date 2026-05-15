@@ -17,7 +17,9 @@
     "poll": "node ia-bdd-agent/poll.js",
     "api": "node ia-bdd-agent/api-server.js",
     "bdd:crm-sync": "node ia-bdd-agent/scripts/sync-bdd-to-bitrix-once.js",
+    "bdd:item": "node ia-bdd-agent/scripts/run-bdd-item.js",
     "bitrix:context": "node ia-bdd-agent/scripts/bitrix-show-context.js",
+    "bitrix:diagnose-linked": "node ia-bdd-agent/scripts/diagnose-linked-tasks.js",
     "test:api": "node ia-bdd-agent/scripts/run-api-fixtures.js"
   },
   "keywords": [],
