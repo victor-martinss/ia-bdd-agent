@@ -1,7 +1,12 @@
 require('../../load-env');
 const axios = require('axios');
 const { getEntityTypeId, getTaskDetail } = require('./bitrix.service');
-const { pushBddToCrmCenariosQa, bddPodePublicarNoCrm } = require('./push-bdd-to-crm');
+const {
+  pushBddToCrmCenariosQa,
+  bddPodePublicarNoCrm,
+  bddQaStorageFieldAlreadyFilled,
+  bddQaStorageFirstFilledFieldKey,
+} = require('./push-bdd-to-crm');
 const {
   resolveQaStageIds,
   resolveDevStageIds,
@@ -117,10 +122,10 @@ async function pushBddToQaLinkedCrmItems(sourceItemId, bdd, options = {}) {
   const { quiet = false, detail = null } = options;
 
   if (process.env.BITRIX_PUSH_BDD_TO_QA_LINKED_CRM === '0') {
-    return { skipped: true, reason: 'BITRIX_PUSH_BDD_TO_QA_LINKED_CRM=0', updated: 0, itemIds: [] };
+    return { skipped: true, reason: 'BITRIX_PUSH_BDD_TO_QA_LINKED_CRM=0', updated: 0, itemIds: [], skippedAlreadyFilled: 0, failed: 0 };
   }
   if (!bddPodePublicarNoCrm(bdd) || !BASE_URL) {
-    return { skipped: true, updated: 0, itemIds: [] };
+    return { skipped: true, updated: 0, itemIds: [], skippedAlreadyFilled: 0, failed: 0 };
   }
 
   const etId = await getEntityTypeId();
@@ -138,13 +143,26 @@ async function pushBddToQaLinkedCrmItems(sourceItemId, bdd, options = {}) {
 
   const qaItems = await listLinkedQaCrmItemIds(sourceItemId, srcDetail);
   if (!qaItems.length) {
-    return { skipped: true, reason: 'nenhum card QA vinculado na fila', updated: 0, itemIds: [] };
+    return { skipped: true, reason: 'nenhum card QA vinculado na fila', updated: 0, itemIds: [], skippedAlreadyFilled: 0, failed: 0 };
   }
 
   let updated = 0;
   const itemIds = [];
+  let skippedAlreadyFilled = 0;
+  let failedPush = 0;
+
   for (const row of qaItems) {
     const childDetail = await getTaskDetail(row.id);
+    if (bddQaStorageFieldAlreadyFilled(childDetail || {})) {
+      skippedAlreadyFilled += 1;
+      if (!quiet) {
+        const fk = bddQaStorageFirstFilledFieldKey(childDetail || {});
+        console.log(
+          `📎 Card QA ${row.id} (${row.title || 'sem título'}) — campo de cenários QA${fk ? ` (${fk})` : ''} já preenchido (sem zona de atualização IA); não altera cenários já aprovados.`
+        );
+      }
+      continue;
+    }
     const r = await pushBddToCrmCenariosQa(row.id, bdd, {
       quiet,
       detail: childDetail || srcDetail,
@@ -154,13 +172,21 @@ async function pushBddToQaLinkedCrmItems(sourceItemId, bdd, options = {}) {
       itemIds.push(row.id);
       if (!quiet) {
         console.log(
-          `📝 Card QA ${row.id} (${row.title || 'sem título'}) ← cenários gravados em ufCrm94CenariosQa`
+          `📝 Card QA ${row.id} (${row.title || 'sem título'}) ← cenários gravados em ${r.field || 'campo QA (BITRIX_UF_BDD_FIELD)'}`
         );
       }
+    } else {
+      failedPush += 1;
     }
   }
 
-  return { ok: updated > 0, updated, itemIds, failed: qaItems.length - updated };
+  return {
+    ok: updated > 0,
+    updated,
+    itemIds,
+    skippedAlreadyFilled,
+    failed: failedPush,
+  };
 }
 
 module.exports = {

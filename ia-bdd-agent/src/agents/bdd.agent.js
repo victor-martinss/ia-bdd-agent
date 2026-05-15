@@ -4,12 +4,15 @@ const { runIA } = require('../services/ia.service');
 const { extractDescription, extractTaskContext } = require('./parser');
 const {
   objetivarFrase,
+  primeiraFrase,
   passosParaStepsGherkin,
   devCenariosParaPassosE,
   montarDadosIniciais,
   ctxTemCamposEstruturados,
   passosAPartirDoTitulo,
   entaoAPartirDoTitulo,
+  resolverPassosReproducao,
+  sanitizarFeatureBdd,
 } = require('../utils/bdd-gherkin');
 
 /**
@@ -33,9 +36,9 @@ function buildStructuredBdd(title, ctx) {
     out.push(...passosAPartirDoTitulo(nomeFuncionalidade));
     out.push(entaoAPartirDoTitulo(nomeFuncionalidade));
   } else {
-    out.push(...passosParaStepsGherkin(ctx.passos));
+    out.push(...passosParaStepsGherkin(resolverPassosReproducao(ctx)));
     if (ctx.resultadoEsperado) {
-      const entao = objetivarFrase(ctx.resultadoEsperado);
+      const entao = objetivarFrase(primeiraFrase(ctx.resultadoEsperado));
       out.push(
         entao
           ? `  Então ${entao}`
@@ -51,9 +54,9 @@ function buildStructuredBdd(title, ctx) {
     out.push(`Cenário: ${nomeFuncionalidade} — comportamento observado (defeito)`);
     out.push('  Dado que o cenário principal foi executado');
     out.push('  Quando o fluxo é concluído');
-    const obtido = objetivarFrase(ctx.resultadoObtido);
-    const esperado = objetivarFrase(ctx.resultadoEsperado);
-    if (obtido) out.push(`  Então o sistema apresenta: ${obtido}`);
+    const obtido = objetivarFrase(primeiraFrase(ctx.resultadoObtido));
+    const esperado = objetivarFrase(primeiraFrase(ctx.resultadoEsperado));
+    if (obtido) out.push(`  Então o sistema apresenta o defeito: ${obtido}`);
     if (esperado) out.push(`    Mas o esperado era: ${esperado}`);
     out.push('');
   }
@@ -73,7 +76,7 @@ function buildStructuredBdd(title, ctx) {
     out.push('');
   }
 
-  return out.join('\n').trimEnd() + '\n';
+  return sanitizarFeatureBdd(out.join('\n'));
 }
 
 async function generateBDD(title, item) {
@@ -110,7 +113,8 @@ function filtrarRespostaBdd(texto) {
   const idxFunc = t.search(/funcionalidade\s*:/i);
   const idxCen = t.search(/cenário\s*:/i);
   const start = idxFunc >= 0 ? idxFunc : idxCen >= 0 ? idxCen : 0;
-  return t.slice(start).trim() || t;
+  const cortado = t.slice(start).trim() || t;
+  return sanitizarFeatureBdd(cortado);
 }
 
 module.exports = { generateBDD, buildStructuredBdd };

@@ -177,4 +177,10 @@ function extractDescription(item) {
   return appendCenariosDeTesteDev('', ctx);
 }
 
-module.exports = { extractDescription, extractTaskContext, buildNarrative, isMeaningful };
+module.exports = {
+  extractDescription,
+  extractTaskContext,
+  buildNarrative,
+  isMeaningful,
+  flattenItem,
+};

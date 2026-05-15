@@ -1,6 +1,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const { handleBitrixOutgoing } = require('./bitrix-outgoing-handler');
 const { generateBDD } = require('../agents/bdd.agent');
 const { pushBddToCrmCenariosQa } = require('../services/push-bdd-to-crm');
 const {
@@ -56,7 +57,8 @@ function sendJson(res, status, obj) {
     'Content-Type': 'application/json; charset=utf-8',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers':
+      'Content-Type, Authorization, X-Webhook-Secret, X-Bitrix-Webhook-Token',
   });
   res.end(body);
 }
@@ -80,12 +82,22 @@ async function handle(req, res) {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Allow-Headers':
+        'Content-Type, Authorization, X-Webhook-Secret, X-Bitrix-Webhook-Token',
     });
     return res.end();
   }
 
   try {
+    const pathNorm = (u.pathname || '/').replace(/\/+$/, '') || '/';
+    if (
+      (pathNorm === '/webhooks/bitrix/outgoing' ||
+        pathNorm === '/bitrix/outgoing') &&
+      (req.method === 'GET' || req.method === 'POST')
+    ) {
+      return handleBitrixOutgoing(req, res, u);
+    }
+
     if (u.pathname === '/health' && req.method === 'GET') {
       return sendJson(res, 200, { ok: true, service: 'ia-bdd-agent-api' });
     }
@@ -182,7 +194,8 @@ async function handle(req, res) {
 
     return sendJson(res, 404, {
       error: 'not found',
-      hint: 'GET /health | GET /fixtures | POST /bdd/from-item | POST /bdd/from-fixture/:id',
+      hint:
+        'GET /health | GET /fixtures | POST /bdd/from-item | POST /bdd/from-fixture/:id | POST /webhooks/bitrix/outgoing',
     });
   } catch (e) {
     return sendJson(res, 400, { error: e.message || String(e) });
@@ -205,6 +218,9 @@ function start(port) {
     );
     console.log(
       '  POST /bdd/from-fixture/:fixtureId  body opcional: { "itemId"?, "pushToCrm"?, "pushToLinkedTasks"? }'
+    );
+    console.log(
+      '  POST /webhooks/bitrix/outgoing  — webhook Bitrix (saída) → BDD por item CRM'
     );
   });
   return server;

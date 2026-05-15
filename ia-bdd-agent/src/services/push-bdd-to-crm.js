@@ -1,4 +1,11 @@
 const { updateCrmItemFields } = require('./bitrix.service');
+const { isMeaningful, flattenItem } = require('../agents/parser');
+const {
+  defaultAppendMarker,
+  mergeFeatureEnabled,
+  crmFieldHasMergeMarker,
+  mergeBddBelowMarker,
+} = require('../utils/bdd-crm-merge');
 
 /**
  * Heurística: chaves UF do item que costumam ser o destino do BDD
@@ -77,7 +84,99 @@ function fieldKeyCandidates(detail) {
   const discovered = discoverQaBddFieldKeys(detail);
   if (discovered.length) return discovered;
 
-  return ['ufCrm94TesteQa', 'ufCrm94CenariosQa'];
+  return [
+    'ufCrm100TesteQa',
+    'ufCrm100CenariosQa',
+    'ufCrm94TesteQa',
+    'ufCrm94CenariosQa',
+  ];
+}
+
+/** Valor UF do CRM já usado como armazenamento de cenários BDD? */
+function crmUfValueMeaningfulForBdd(raw) {
+  if (raw === undefined || raw === null) return false;
+  if (Array.isArray(raw)) {
+    const joined = raw.map((x) => String(x).trim()).filter(Boolean).join('\n');
+    return isMeaningful(joined);
+  }
+  return isMeaningful(String(raw));
+}
+
+/**
+ * Chaves a inspecionar para decidir se já existe BDD gravado (não gerar de novo).
+ * Usa BITRIX_UF_BDD_FIELD / descoberta; fallback inclui ufCrm94CenariosQa (NGF) e ufCrm100CenariosQa.
+ * @param {Record<string, unknown> | null | undefined} detail
+ * @returns {string[]}
+ */
+function fieldKeysForBddPresenceCheck(detail) {
+  const flat = flattenItem(detail || {});
+  const fromEnv = envFieldList();
+  if (fromEnv.length) return [...new Set(fromEnv)];
+
+  const discovered = discoverQaBddFieldKeys(flat);
+  if (discovered.length) return discovered;
+
+  return ['ufCrm94CenariosQa', 'ufCrm100CenariosQa'];
+}
+
+/**
+ * Evita gerar/sobrescrever quando o campo QA já tem conteúdo “protegido” (sem zona de append).
+ * Desligar: BITRIX_SKIP_BDD_IF_QA_FILLED=0.
+ * @param {Record<string, unknown> | null | undefined} detail
+ */
+function bddQaStorageFieldAlreadyFilled(detail) {
+  return bddQaCrmPushWouldOverwriteWithoutMerge(detail);
+}
+
+/**
+ * Primeiro campo QA com conteúdo (para log), ou null.
+ * @param {Record<string, unknown> | null | undefined} detail
+ * @returns {string | null}
+ */
+function bddQaStorageFirstFilledFieldKey(detail) {
+  const flat = flattenItem(detail || {});
+  const keys = fieldKeysForBddPresenceCheck(flat);
+  for (const k of keys) {
+    if (!Object.prototype.hasOwnProperty.call(flat, k)) continue;
+    if (crmUfValueMeaningfulForBdd(flat[k])) return k;
+  }
+  return null;
+}
+
+/**
+ * Primeiro campo QA com texto útil + string normalizada (arrays CRM → \\n).
+ * @param {Record<string, unknown>} flat
+ * @returns {{ key: string | null, text: string }}
+ */
+function qaBddFieldTextFromFlat(flat) {
+  const keys = fieldKeysForBddPresenceCheck(flat || {});
+  for (const k of keys) {
+    if (!flat || !Object.prototype.hasOwnProperty.call(flat, k)) continue;
+    const raw = flat[k];
+    if (!crmUfValueMeaningfulForBdd(raw)) continue;
+    if (Array.isArray(raw)) {
+      const text = raw.map((x) => String(x).trim()).filter(Boolean).join('\n');
+      if (isMeaningful(text)) return { key: k, text: text.trim() };
+      continue;
+    }
+    return { key: k, text: String(raw).trim() };
+  }
+  return { key: null, text: '' };
+}
+
+/**
+ * Gravar BDD substituiria conteúdo “protegido” (cenários já aprovados / manuais)?
+ * Desligar proteção: BITRIX_SKIP_BDD_IF_QA_FILLED=0.
+ * Preservar topo e só atualizar bloco IA: BITRIX_BDD_MERGE_BELOW_MARKER=1 + linha BITRIX_BDD_APPEND_MARKER no campo.
+ */
+function bddQaCrmPushWouldOverwriteWithoutMerge(detail) {
+  if (process.env.BITRIX_SKIP_BDD_IF_QA_FILLED === '0') return false;
+  const { text } = qaBddFieldTextFromFlat(flattenItem(detail || {}));
+  if (!text) return false;
+  if (mergeFeatureEnabled() && crmFieldHasMergeMarker(text, defaultAppendMarker())) {
+    return false;
+  }
+  return true;
 }
 
 function bddPodePublicarNoCrm(bdd) {
@@ -117,7 +216,27 @@ async function pushBddToCrmCenariosQa(taskId, bdd, options = {}) {
     return { skipped: true, reason: 'bdd inválido ou placeholder' };
   }
 
-  const valor = truncarParaCampoUf(bdd.trim());
+  let valor = bdd.trim();
+  const flat = flattenItem(detail || {});
+  const { text: existingQaText } = qaBddFieldTextFromFlat(flat);
+  const marker = defaultAppendMarker();
+  if (
+    mergeFeatureEnabled() &&
+    existingQaText &&
+    crmFieldHasMergeMarker(existingQaText, marker)
+  ) {
+    const merged = mergeBddBelowMarker(existingQaText, valor, marker);
+    if (merged) {
+      valor = merged;
+      if (process.env.DEBUG_BITRIX === '1' && !quiet) {
+        console.log(
+          `[CRM] item ${taskId} — mesclando BDD abaixo do marcador (cenários aprovados preservados)`
+        );
+      }
+    }
+  }
+
+  valor = truncarParaCampoUf(valor);
   const candidates = fieldKeyCandidates(detail);
 
   if (process.env.DEBUG_BITRIX === '1' && !quiet) {
@@ -159,4 +278,10 @@ module.exports = {
   discoverQaBddFieldKeys,
   discoverCenariosQaFieldKeys,
   fieldKeyCandidates,
+  bddQaStorageFieldAlreadyFilled,
+  bddQaCrmPushWouldOverwriteWithoutMerge,
+  qaBddFieldTextFromFlat,
+  bddQaStorageFirstFilledFieldKey,
+  fieldKeysForBddPresenceCheck,
+  crmUfValueMeaningfulForBdd,
 };

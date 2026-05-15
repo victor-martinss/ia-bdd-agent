@@ -6,6 +6,56 @@ const BASE_URL = process.env.BITRIX_WEBHOOK;
 /** @type {Promise<number> | null} */
 let resolvedEntityTypeIdPromise = null;
 
+/** Override por comando (ex.: bdd:item 1110 1294) — não altera o .env global. */
+let runtimeEntityTypeIdOverride = null;
+
+function setRuntimeEntityTypeIdOverride(entityTypeId) {
+  const n = Number.parseInt(String(entityTypeId), 10);
+  runtimeEntityTypeIdOverride = Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function clearRuntimeEntityTypeIdOverride() {
+  runtimeEntityTypeIdOverride = null;
+}
+
+/** IDs extras quando BITRIX_ENTITY_TYPE_IDS está definido. */
+function extraEntityTypeIdsFromEnv() {
+  const raw = (process.env.BITRIX_ENTITY_TYPE_IDS || '').trim();
+  if (!raw) return [];
+  return raw
+    .split(/[,;\s]+/)
+    .map((s) => Number.parseInt(s.trim(), 10))
+    .filter((n) => Number.isFinite(n) && n > 0);
+}
+
+/**
+ * Ordem de probe para crm.item.get: principal, depois env, depois par 1276↔1294
+ * (comum em portais com NGF + segundo SPA) se BITRIX_ENTITY_TYPE_IDS estiver vazio.
+ * Desligar: BITRIX_DISABLE_BUILTIN_ENTITY_PROBE=1
+ */
+function buildEntityTypeIdCandidates(primaryEt) {
+  const tried = new Set();
+  const out = [];
+  const push = (et) => {
+    const n = Number.parseInt(String(et), 10);
+    if (!Number.isFinite(n) || n <= 0 || tried.has(n)) return;
+    tried.add(n);
+    out.push(n);
+  };
+
+  push(primaryEt);
+  for (const et of extraEntityTypeIdsFromEnv()) push(et);
+
+  if (
+    process.env.BITRIX_DISABLE_BUILTIN_ENTITY_PROBE !== '1' &&
+    !(process.env.BITRIX_ENTITY_TYPE_IDS || '').trim()
+  ) {
+    for (const et of [1276, 1294]) push(et);
+  }
+
+  return out;
+}
+
 function listPageSize() {
   const n = Number.parseInt(process.env.BITRIX_LIST_PAGE_SIZE || '100', 10);
   if (Number.isFinite(n) && n >= 1 && n <= 500) return n;
@@ -38,6 +88,9 @@ function parseJsonEnv(varName) {
  * entityTypeId explícito no .env, senão resolve pelo título do SPA (crm.type.list), senão 1276.
  */
 async function getEntityTypeId() {
+  if (runtimeEntityTypeIdOverride != null) {
+    return runtimeEntityTypeIdOverride;
+  }
   if (!resolvedEntityTypeIdPromise) {
     resolvedEntityTypeIdPromise = computeEntityTypeId();
   }
@@ -344,21 +397,93 @@ function flattenFilterForGet(filter) {
   return out;
 }
 
-async function getTaskDetail(id) {
+/**
+ * @param {number} entityTypeId
+ * @param {number} itemId
+ * @returns {Promise<{ item: Record<string, unknown>, entityTypeId: number } | null>}
+ */
+async function fetchCrmItemByEntityType(entityTypeId, itemId) {
   const url = `${BASE_URL}/crm.item.get`;
-  const etId = await getEntityTypeId();
+  const body = { entityTypeId, id: itemId };
 
-  const response = await axios.get(url, {
-    params: {
-      entityTypeId: etId,
-      id,
-    },
-  });
+  let response = await axios
+    .get(url, {
+      params: body,
+      validateStatus: (s) => s >= 200 && s < 500,
+    })
+    .catch(() => null);
 
-  const msg = restErrorMessage(response.data);
-  if (msg) throw new Error(msg);
+  let msg = response ? restErrorMessage(response.data) : 'falha na requisição GET';
+  if (!response || response.status >= 400 || msg) {
+    response = await axios.post(url, body, {
+      headers: { 'Content-Type': 'application/json' },
+      validateStatus: (s) => s >= 200 && s < 500,
+    });
+    msg = restErrorMessage(response.data);
+  }
 
-  return response.data.result.item;
+  logRestDebug(`crm.item.get et=${entityTypeId}`, response);
+
+  if (response.status >= 400 || msg) {
+    if (response.data && response.data.error === 'NOT_FOUND') return null;
+    throw new Error(
+      msg || `crm.item.get HTTP ${response.status} (entityTypeId=${entityTypeId}, id=${itemId})`
+    );
+  }
+
+  const item = response.data && response.data.result && response.data.result.item;
+  if (!item) return null;
+  return { item, entityTypeId };
+}
+
+/**
+ * @param {number|string} id
+ * @param {{ entityTypeId?: number }} [options]
+ * @returns {Promise<Record<string, unknown>>}
+ */
+async function getTaskDetail(id, options = {}) {
+  if (!BASE_URL) {
+    throw new Error('BITRIX_WEBHOOK não definido');
+  }
+
+  const itemId = Number.parseInt(String(id), 10);
+  if (!Number.isFinite(itemId) || itemId <= 0) {
+    throw new Error(`ID de item CRM inválido: ${id}`);
+  }
+
+  const primaryEt =
+    options.entityTypeId != null && Number.isFinite(Number(options.entityTypeId))
+      ? Number(options.entityTypeId)
+      : await getEntityTypeId();
+
+  const candidates = buildEntityTypeIdCandidates(primaryEt);
+
+  for (const etId of candidates) {
+    const found = await fetchCrmItemByEntityType(etId, itemId);
+    if (found) {
+      if (etId !== primaryEt) {
+        console.log(
+          `[Bitrix] item ${itemId} encontrado em entityTypeId=${etId} (não estava em ${primaryEt})`
+        );
+        setRuntimeEntityTypeIdOverride(etId);
+      }
+      return found.item;
+    }
+  }
+
+  const extras = extraEntityTypeIdsFromEnv();
+  const hintEt =
+    extras.length > 0
+      ? ` Ou: npm run bdd:item -- ${itemId} <entityTypeId>`
+      : ` Ou: npm run bdd:item -- ${itemId} 1294`;
+
+  throw new Error(
+    `Item CRM ${itemId} não encontrado nos SPAs tentados (principal entityTypeId=${primaryEt}).\n` +
+      `• Confira o número na URL (…/type/1294/details/${itemId}/).\n` +
+      `• type/1294 = SPA; details/1112 = id do card.${hintEt}\n` +
+      `• Ajuste BITRIX_ENTITY_TYPE_ID ou BITRIX_ENTITY_TYPE_IDS no .env.\n` +
+      `• Probe automático 1276+1294: desligue com BITRIX_DISABLE_BUILTIN_ENTITY_PROBE=1`
+  );
 }
 
 async function updateCrmItemFieldsJson(id, fields) {
@@ -431,6 +556,8 @@ function entityTypeIdSync() {
 
 module.exports = {
   getEntityTypeId,
+  setRuntimeEntityTypeIdOverride,
+  clearRuntimeEntityTypeIdOverride,
   /** @deprecated use getEntityTypeId() — mantido para scripts que esperam número síncrono */
   entityTypeId: entityTypeIdSync,
   getTasks,

@@ -498,6 +498,8 @@ function taskBddFieldKeysFromEnv() {
     process.env.BITRIX_UF_BDD_FIELD,
     process.env.BITRIX_UF_CENARIOS_QA,
     process.env.BITRIX_UF_TESTE_QA,
+    'ufCrm100CenariosQa',
+    'ufCrm100TesteQa',
     'ufCrm94CenariosQa',
     'ufCrm94TesteQa',
   ]

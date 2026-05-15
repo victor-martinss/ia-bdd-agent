@@ -1,6 +1,12 @@
 /**
- * Consulta a fila do Bitrix a cada X minutos (padrão 15) e gera BDD
- * apenas para tarefas ainda não vistas (IDs persistidos em poll-state).
+ * Consulta a fila do Bitrix em loop e gera BDD para IDs ainda não vistos
+ * (persistidos em poll-state.json).
+ *
+ * Intervalo:
+ * • BDD_POLL_INTERVAL_SECONDS tem prioridade (ex.: 15)
+ * • senão BDD_POLL_INTERVAL_MINUTES (ex.: 1 ou 0.5)
+ * • padrão: 30 segundos (quase tempo real sem martelar a API).
+ * Mínimo: 10 segundos entre consultas.
  */
 require('./load-env');
 
@@ -15,8 +21,31 @@ const {
 } = require('./src/utils/poll-state');
 
 const PKG = __dirname;
-const INTERVAL_MS =
-  (Number(process.env.BDD_POLL_INTERVAL_MINUTES) || 15) * 60 * 1000;
+const MIN_INTERVAL_MS = 10_000;
+
+function resolvePollIntervalMs() {
+  const secRaw = (process.env.BDD_POLL_INTERVAL_SECONDS || '').trim();
+  if (secRaw) {
+    const s = Number.parseFloat(secRaw);
+    if (Number.isFinite(s) && s > 0) {
+      return Math.max(MIN_INTERVAL_MS, Math.round(s * 1000));
+    }
+  }
+  const minRaw = (process.env.BDD_POLL_INTERVAL_MINUTES || '').trim();
+  if (minRaw) {
+    const m = Number.parseFloat(minRaw);
+    if (Number.isFinite(m) && m > 0) {
+      return Math.max(MIN_INTERVAL_MS, Math.round(m * 60 * 1000));
+    }
+  }
+  return Math.max(MIN_INTERVAL_MS, 30 * 1000);
+}
+
+function formatInterval(ms) {
+  if (ms < 60_000) return `${ms / 1000}s`;
+  if (ms % 60_000 === 0) return `${ms / 60_000} min`;
+  return `${Math.round(ms / 1000)}s (${(ms / 60_000).toFixed(2)} min)`;
+}
 
 function normId(id) {
   const n = Number(id);
@@ -71,16 +100,18 @@ async function tick() {
 }
 
 async function main() {
-  const min = INTERVAL_MS / 60000;
+  const intervalMs = resolvePollIntervalMs();
   console.log('ia-bdd-agent — modo fila automática');
-  console.log(`Intervalo: ${min} min (BDD_POLL_INTERVAL_MINUTES)`);
+  console.log(
+    `Intervalo entre consultas: ${formatInterval(intervalMs)} (env: BDD_POLL_INTERVAL_SECONDS ou BDD_POLL_INTERVAL_MINUTES; padrão 30s, mín. 10s)`
+  );
   console.log(`Estado: ${stateFilePath(PKG)}`);
   console.log('Ctrl+C para encerrar.\n');
 
-  await tick().catch(console.error);
-  setInterval(() => {
-    tick().catch(console.error);
-  }, INTERVAL_MS);
+  for (;;) {
+    await tick().catch(console.error);
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
 }
 
 main().catch(console.error);
