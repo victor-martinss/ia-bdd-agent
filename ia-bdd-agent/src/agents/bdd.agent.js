@@ -2,25 +2,19 @@ const path = require('path');
 const fs = require('fs');
 const { runIA } = require('../services/ia.service');
 const { extractDescription, extractTaskContext } = require('./parser');
-
-function passosParaSteps(passos) {
-  if (!passos || !passos.trim()) return ['  Quando o usuário executa o fluxo descrito no chamado'];
-  const max =
-    Number.parseInt(process.env.BDD_MAX_PASSO_LINES || '50', 10) || 50;
-  const partes = passos
-    .split(/\n+|(?<=[.!?])\s+/)
-    .map((p) => p.trim())
-    .filter(Boolean);
-  const linhas = [];
-  partes.slice(0, Math.max(1, max)).forEach((p, i) => {
-    const prefix = i === 0 ? '  Quando ' : '    E ';
-    linhas.push(`${prefix}${p.charAt(0).toLowerCase()}${p.slice(1)}`);
-  });
-  return linhas;
-}
+const {
+  objetivarFrase,
+  passosParaStepsGherkin,
+  devCenariosParaPassosE,
+  montarDadosIniciais,
+  ctxTemCamposEstruturados,
+  passosAPartirDoTitulo,
+  entaoAPartirDoTitulo,
+} = require('../utils/bdd-gherkin');
 
 /**
  * BDD determinístico a partir dos campos do CRM (sem LLM).
+ * Cenários objetivos em Dado / Quando / Então / E — sem colar descrições inteiras.
  */
 function buildStructuredBdd(title, ctx) {
   const nomeFuncionalidade = ctx.titulo || title;
@@ -29,51 +23,57 @@ function buildStructuredBdd(title, ctx) {
   out.push(`Funcionalidade: ${nomeFuncionalidade}`);
   out.push('');
 
+  const soTitulo = !ctxTemCamposEstruturados(ctx);
+
   out.push(`Cenário: ${nomeFuncionalidade} — validação principal`);
-  out.push('  Dado que o sistema está em operação');
-  if (ctx.descricao) {
-    out.push('    E o contexto documentado no chamado é:');
-    out.push('      """');
-    for (const line of ctx.descricao.split(/\r?\n/)) {
-      out.push(line);
-    }
-    out.push('      """');
-  }
-  if (ctx.cenariosTesteDev) {
-    out.push('    E o time de desenvolvimento documentou estes cenários de teste:');
-    out.push('      """');
-    for (const line of ctx.cenariosTesteDev.split(/\r?\n/)) {
-      out.push(line);
-    }
-    out.push('      """');
-  }
-  out.push(...passosParaSteps(ctx.passos));
-  if (ctx.resultadoEsperado) {
-    out.push(`  Então ${ctx.resultadoEsperado}`);
+  out.push(...montarDadosIniciais(ctx));
+  out.push(...devCenariosParaPassosE(ctx.cenariosTesteDev));
+
+  if (soTitulo) {
+    out.push(...passosAPartirDoTitulo(nomeFuncionalidade));
+    out.push(entaoAPartirDoTitulo(nomeFuncionalidade));
   } else {
-    out.push('  Então o comportamento deve estar alinhado à regra de negócio descrita no chamado');
+    out.push(...passosParaStepsGherkin(ctx.passos));
+    if (ctx.resultadoEsperado) {
+      const entao = objetivarFrase(ctx.resultadoEsperado);
+      out.push(
+        entao
+          ? `  Então ${entao}`
+          : '  Então o sistema deve exibir o resultado esperado para o fluxo'
+      );
+    } else {
+      out.push('  Então o comportamento deve estar alinhado à regra de negócio do chamado');
+    }
   }
   out.push('');
 
   if (ctx.resultadoObtido && ctx.resultadoEsperado) {
     out.push(`Cenário: ${nomeFuncionalidade} — comportamento observado (defeito)`);
     out.push('  Dado que o cenário principal foi executado');
-    out.push(`  Quando o fluxo é concluído`);
-    out.push(`  Então o sistema apresenta: ${ctx.resultadoObtido}`);
-    out.push(`    Mas o esperado era: ${ctx.resultadoEsperado}`);
+    out.push('  Quando o fluxo é concluído');
+    const obtido = objetivarFrase(ctx.resultadoObtido);
+    const esperado = objetivarFrase(ctx.resultadoEsperado);
+    if (obtido) out.push(`  Então o sistema apresenta: ${obtido}`);
+    if (esperado) out.push(`    Mas o esperado era: ${esperado}`);
     out.push('');
   }
 
   if (ctx.sugestaoMelhoria || ctx.motivoMelhoria) {
     out.push(`Cenário: ${nomeFuncionalidade} — melhoria sugerida`);
     out.push('  Dado que o time analisou o chamado');
-    if (ctx.motivoMelhoria) out.push(`    E o motivo: ${ctx.motivoMelhoria}`);
-    if (ctx.sugestaoMelhoria) out.push(`  Quando a melhoria "${ctx.sugestaoMelhoria}" for implementada`);
+    if (ctx.motivoMelhoria) {
+      const motivo = objetivarFrase(ctx.motivoMelhoria);
+      if (motivo) out.push(`    E o motivo registrado é: ${motivo}`);
+    }
+    if (ctx.sugestaoMelhoria) {
+      const melhoria = objetivarFrase(ctx.sugestaoMelhoria);
+      if (melhoria) out.push(`  Quando a melhoria for implementada: ${melhoria}`);
+    }
     out.push('  Então o sistema deve atender ao objetivo da melhoria sem regressões no fluxo existente');
     out.push('');
   }
 
-  return out.join('\n');
+  return out.join('\n').trimEnd() + '\n';
 }
 
 async function generateBDD(title, item) {

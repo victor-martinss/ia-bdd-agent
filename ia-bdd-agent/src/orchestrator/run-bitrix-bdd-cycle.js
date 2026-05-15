@@ -1,7 +1,10 @@
 const path = require('path');
 const { getTasks, getTaskDetail } = require('../services/bitrix.service');
 const { pushBddToCrmCenariosQa } = require('../services/push-bdd-to-crm');
-const { pushBddToLinkedBitrixTasks } = require('../services/push-bdd-to-linked-tasks');
+const {
+  pushBddToLinkedBitrixTasks,
+  pushBddToLinkedCrmChildItems,
+} = require('../services/push-bdd-to-linked-tasks');
 const { generateBDD } = require('../agents/bdd.agent');
 const { initAggregateFile, writeBddArtifacts } = require('../utils/bdd-output');
 
@@ -76,9 +79,35 @@ async function runBitrixBddCycle(packageRoot, options = {}) {
 
       const linkResult = await pushBddToLinkedBitrixTasks(task.id, bdd, {
         quiet,
+        detail,
       });
       linkedTasks.updated += linkResult.updated || 0;
       linkedTasks.failed += linkResult.failed || 0;
+      if (!quiet) {
+        if (linkResult.skipped) {
+          console.log(
+            `📎 Tarefas Bitrix: ${linkResult.reason || 'nenhuma atualização'} (IDs tentados: ${(linkResult.taskIds || []).join(', ') || '—'})`
+          );
+        } else if (linkResult.updated) {
+          console.log(
+            `📎 Tarefas Bitrix: ${linkResult.updated} gravada(s) — IDs ${(linkResult.taskIds || []).join(', ')}`
+          );
+        }
+      }
+
+      const childCrmResult = await pushBddToLinkedCrmChildItems(task.id, bdd, {
+        quiet,
+        detail,
+      });
+      linkedTasks.updated += childCrmResult.updated || 0;
+      if (childCrmResult.failed) {
+        linkedTasks.failed += childCrmResult.failed;
+      }
+      if (!quiet && childCrmResult.updated) {
+        console.log(
+          `📎 Itens CRM filhos: ${childCrmResult.updated} gravado(s) — IDs ${(childCrmResult.itemIds || []).join(', ')}`
+        );
+      }
       if (!quiet) {
         console.log(bdd);
         console.log('');

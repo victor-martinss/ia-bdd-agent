@@ -72,8 +72,8 @@ function extractTaskContext(raw) {
   const item = flattenItem(raw);
   return {
     titulo:
-      (isMeaningful(item.ufCrm94NgfTitulo) && texto(item.ufCrm94NgfTitulo)) ||
       (isMeaningful(item.title) && texto(item.title)) ||
+      (isMeaningful(item.ufCrm94NgfTitulo) && texto(item.ufCrm94NgfTitulo)) ||
       '',
 
     descricao: isMeaningful(item.ufCrm94NgfDescricaoDoOcorrido)

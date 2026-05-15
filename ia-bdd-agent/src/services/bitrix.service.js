@@ -106,19 +106,31 @@ async function fetchSpaTypesList() {
     return [];
   }
   const url = `${BASE_URL}/crm.type.list`;
-  const response = await axios.get(url, {});
-  const msg = restErrorMessage(response.data);
-  if (msg) {
-    console.warn('[Bitrix] crm.type.list:', msg);
+  try {
+    const response = await axios.get(url, {
+      validateStatus: (s) => s >= 200 && s < 500,
+    });
+    const msg = restErrorMessage(response.data);
+    if (msg) {
+      if (process.env.DEBUG_BITRIX === '1') {
+        console.warn('[Bitrix] crm.type.list:', msg);
+      }
+      spaTypesListCache = [];
+      return [];
+    }
+    const result = response.data.result;
+    const types = Array.isArray(result)
+      ? result
+      : (result && (result.types || result.TYPES)) || [];
+    spaTypesListCache = types;
+    return types;
+  } catch (e) {
+    if (process.env.DEBUG_BITRIX === '1') {
+      console.warn('[Bitrix] crm.type.list (rede):', e.message || e);
+    }
     spaTypesListCache = [];
     return [];
   }
-  const result = response.data.result;
-  const types = Array.isArray(result)
-    ? result
-    : (result && (result.types || result.TYPES)) || [];
-  spaTypesListCache = types;
-  return types;
 }
 
 /**

@@ -38,4 +38,28 @@ function savePollState(packageRoot, state) {
   fs.writeFileSync(p, JSON.stringify(out, null, 2), 'utf8');
 }
 
-module.exports = { loadPollState, savePollState, stateFilePath };
+/** Remove IDs do estado (para reprocessar no poll). */
+function removeIdsFromPollState(packageRoot, ids) {
+  const state = loadPollState(packageRoot);
+  const drop = new Set(ids.map((id) => Number(id)));
+  state.processedIds = state.processedIds.filter((id) => !drop.has(Number(id)));
+  savePollState(packageRoot, state);
+  return state;
+}
+
+function parseForceIdsFromEnv() {
+  const raw = (process.env.BDD_POLL_FORCE_IDS || '').trim();
+  if (!raw) return [];
+  return raw
+    .split(/[,;\s]+/)
+    .map((s) => Number.parseInt(s.trim(), 10))
+    .filter((n) => Number.isFinite(n) && n > 0);
+}
+
+module.exports = {
+  loadPollState,
+  savePollState,
+  stateFilePath,
+  removeIdsFromPollState,
+  parseForceIdsFromEnv,
+};

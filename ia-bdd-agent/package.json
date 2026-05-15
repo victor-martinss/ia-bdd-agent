@@ -13,7 +13,9 @@
     "poll": "node poll.js",
     "api": "node api-server.js",
     "bdd:crm-sync": "node scripts/sync-bdd-to-bitrix-once.js",
+    "bdd:item": "node scripts/run-bdd-item.js",
     "bitrix:context": "node scripts/bitrix-show-context.js",
+    "bitrix:diagnose-linked": "node scripts/diagnose-linked-tasks.js",
     "test:api": "node scripts/run-api-fixtures.js"
   },
   "dependencies": {

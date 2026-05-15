@@ -3,7 +3,10 @@ const fs = require('fs');
 const path = require('path');
 const { generateBDD } = require('../agents/bdd.agent');
 const { pushBddToCrmCenariosQa } = require('../services/push-bdd-to-crm');
-const { pushBddToLinkedBitrixTasks } = require('../services/push-bdd-to-linked-tasks');
+const {
+  pushBddToLinkedBitrixTasks,
+  pushBddToLinkedCrmChildItems,
+} = require('../services/push-bdd-to-linked-tasks');
 
 const FIXTURES_PATH = path.join(__dirname, '../../fixtures/bdd-scenarios.json');
 const MAX_BODY = 2 * 1024 * 1024;
@@ -121,7 +124,12 @@ async function handle(req, res) {
           payload.linkedTasksPush = await pushBddToLinkedBitrixTasks(
             idCheck.id,
             bdd,
-            { quiet: true }
+            { quiet: true, detail: item }
+          );
+          payload.linkedCrmChildrenPush = await pushBddToLinkedCrmChildItems(
+            idCheck.id,
+            bdd,
+            { quiet: true, detail: item }
           );
         }
       }
@@ -160,7 +168,12 @@ async function handle(req, res) {
           payload.linkedTasksPush = await pushBddToLinkedBitrixTasks(
             idCheck.id,
             bdd,
-            { quiet: true }
+            { quiet: true, detail: fx.item }
+          );
+          payload.linkedCrmChildrenPush = await pushBddToLinkedCrmChildItems(
+            idCheck.id,
+            bdd,
+            { quiet: true, detail: fx.item }
           );
         }
       }

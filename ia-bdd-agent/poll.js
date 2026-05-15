@@ -6,7 +6,13 @@ require('./load-env');
 
 const { getTasks } = require('./src/services/bitrix.service');
 const { runBitrixBddCycle } = require('./src/orchestrator/run-bitrix-bdd-cycle');
-const { loadPollState, savePollState, stateFilePath } = require('./src/utils/poll-state');
+const {
+  loadPollState,
+  savePollState,
+  stateFilePath,
+  removeIdsFromPollState,
+  parseForceIdsFromEnv,
+} = require('./src/utils/poll-state');
 
 const PKG = __dirname;
 const INTERVAL_MS =
@@ -20,9 +26,21 @@ function normId(id) {
 async function tick() {
   const state = loadPollState(PKG);
   const seen = new Set(state.processedIds.map(normId));
+  const forceIds = parseForceIdsFromEnv();
+
+  if (forceIds.length) {
+    removeIdsFromPollState(PKG, forceIds);
+    forceIds.forEach((id) => seen.delete(normId(id)));
+    console.log(`Reprocessamento forçado (BDD_POLL_FORCE_IDS): ${forceIds.join(', ')}`);
+  }
 
   const tasks = await getTasks();
-  const newTasks = tasks.filter((t) => !seen.has(normId(t.id)));
+  let newTasks = tasks.filter((t) => !seen.has(normId(t.id)));
+
+  if (process.env.BDD_POLL_REPROCESS_IN_QUEUE === '1') {
+    newTasks = tasks;
+    console.log('BDD_POLL_REPROCESS_IN_QUEUE=1 — todos os itens da fila serão processados.');
+  }
 
   console.log(
     `\n[${new Date().toISOString()}] Fila: ${tasks.length} item(ns) | novas (ainda não processadas): ${newTasks.length}`

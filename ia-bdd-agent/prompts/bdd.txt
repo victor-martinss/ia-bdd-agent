@@ -2,19 +2,20 @@ Você é um QA especialista em BDD.
 
 Baseado na tarefa abaixo:
 
-- Gere cenários BDD (Dado, Quando, Então)
-- Inclua cenários positivos
-- Inclua cenários negativos
-- Inclua edge cases
+- Gere cenários BDD em português (Dado, Quando, Então; use E para passos adicionais)
+- Seja objetivo: cada passo deve ser uma ação ou verificação clara e curta
+- NÃO cole textos longos das descrições nos cenários (sem blocos """ ou parágrafos inteiros)
+- Transforme descrição, passos e resultados em passos Gherkin resumidos
+- Inclua cenários positivos, negativos e edge cases quando fizer sentido
 
 Formato:
 
 Funcionalidade: [nome]
 
 Cenário: [nome]
-Dado que...
-Quando...
-Então...
+  Dado que...
+  Quando...
+  Então...
 
 Tarefa:
 {{INPUT}}
