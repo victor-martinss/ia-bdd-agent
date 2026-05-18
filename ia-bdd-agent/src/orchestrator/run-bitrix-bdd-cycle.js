@@ -2,8 +2,7 @@ const path = require('path');
 const { getTasks, getTaskDetail } = require('../services/bitrix.service');
 const {
   pushBddToCrmCenariosQa,
-  bddQaStorageFieldAlreadyFilled,
-  bddQaStorageFirstFilledFieldKey,
+  classifyBddQaItemAction,
 } = require('../services/push-bdd-to-crm');
 const { pushBddToLinkedBitrixTasks } = require('../services/push-bdd-to-linked-tasks');
 const { pushBddToQaLinkedCrmItems } = require('../services/push-bdd-to-qa-linked-crm');
@@ -51,23 +50,29 @@ async function runBitrixBddCycle(packageRoot, options = {}) {
   const linkedTasks = { updated: 0, failed: 0 };
   for (const task of tasks) {
     try {
-      const detail = await getTaskDetail(task.id);
+      const detail = task._prefetchedDetail || (await getTaskDetail(task.id));
+      const classification =
+        task._classification || classifyBddQaItemAction(detail);
 
-      if (bddQaStorageFieldAlreadyFilled(detail)) {
-        const fk = bddQaStorageFirstFilledFieldKey(detail);
+      if (classification.action === 'skip_filled') {
         if (!quiet) {
           console.log('\n==============================');
           console.log(`TASK: ${task.id} - ${task.title}`);
           console.log('==============================');
-          console.log(
-            `[CRM] Cenários QA${fk ? ` (${fk})` : ''} já preenchidos — tarefa ignorada (não altera cenários já aprovados / manuais).`
-          );
-          console.log(
-            '(Opções: limpar o campo; BITRIX_SKIP_BDD_IF_QA_FILLED=0 para substituir tudo; ou BITRIX_BDD_MERGE_BELOW_MARKER=1 + linha BITRIX_BDD_APPEND_MARKER no texto.)\n'
-          );
+          console.log(`[CRM] ${classification.reason}`);
+          if (classification.fieldKey) {
+            console.log(`      Campo: ${classification.fieldKey}`);
+          }
+          console.log('');
         }
         crm.skipped += 1;
         continue;
+      }
+
+      if (!quiet && classification.action === 'merge') {
+        console.log(
+          `\n[CRM] Item ${task.id}: ${classification.reason}`
+        );
       }
 
       const bdd = await generateBDD(task.title, detail);

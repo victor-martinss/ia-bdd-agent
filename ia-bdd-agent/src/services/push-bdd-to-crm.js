@@ -171,12 +171,56 @@ function qaBddFieldTextFromFlat(flat) {
  */
 function bddQaCrmPushWouldOverwriteWithoutMerge(detail) {
   if (process.env.BITRIX_SKIP_BDD_IF_QA_FILLED === '0') return false;
-  const { text } = qaBddFieldTextFromFlat(flattenItem(detail || {}));
-  if (!text) return false;
-  if (mergeFeatureEnabled() && crmFieldHasMergeMarker(text, defaultAppendMarker())) {
-    return false;
+  return classifyBddQaItemAction(detail).action === 'skip_filled';
+}
+
+/**
+ * Próxima ação para um item da fila QA (poll / ciclo).
+ * @param {Record<string, unknown> | null | undefined} detail
+ * @returns {{ action: 'generate'|'merge'|'skip_filled', fieldKey?: string|null, reason: string }}
+ */
+function classifyBddQaItemAction(detail) {
+  const flat = flattenItem(detail || {});
+  const { key, text } = qaBddFieldTextFromFlat(flat);
+  const fieldKey = key || bddQaStorageFirstFilledFieldKey(detail);
+
+  if (!text) {
+    return {
+      action: 'generate',
+      fieldKey,
+      reason: 'campo de cenários QA vazio — gerar BDD',
+    };
   }
-  return true;
+
+  if (process.env.BITRIX_SKIP_BDD_IF_QA_FILLED === '0') {
+    return {
+      action: 'generate',
+      fieldKey,
+      reason: 'BITRIX_SKIP_BDD_IF_QA_FILLED=0 — regerar mesmo com campo preenchido',
+    };
+  }
+
+  if (mergeFeatureEnabled() && crmFieldHasMergeMarker(text, defaultAppendMarker())) {
+    return {
+      action: 'merge',
+      fieldKey,
+      reason: 'atualizar bloco IA abaixo do marcador (aprovados preservados)',
+    };
+  }
+
+  if (mergeFeatureEnabled()) {
+    return {
+      action: 'skip_filled',
+      fieldKey,
+      reason: `cenários já preenchidos em ${fieldKey || 'ufCrm94CenariosQa'} — inclua a linha ${defaultAppendMarker()} após o bloco aprovado para permitir atualização só do bloco IA`,
+    };
+  }
+
+  return {
+    action: 'skip_filled',
+    fieldKey,
+    reason: 'cenários QA já preenchidos — não altera conteúdo aprovado/manual',
+  };
 }
 
 function bddPodePublicarNoCrm(bdd) {
@@ -280,6 +324,7 @@ module.exports = {
   fieldKeyCandidates,
   bddQaStorageFieldAlreadyFilled,
   bddQaCrmPushWouldOverwriteWithoutMerge,
+  classifyBddQaItemAction,
   qaBddFieldTextFromFlat,
   bddQaStorageFirstFilledFieldKey,
   fieldKeysForBddPresenceCheck,
