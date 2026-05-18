@@ -92,14 +92,26 @@ function fieldKeyCandidates(detail) {
   ];
 }
 
+function stripHtmlNoiseForBdd(s) {
+  return String(s)
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 /** Valor UF do CRM já usado como armazenamento de cenários BDD? */
 function crmUfValueMeaningfulForBdd(raw) {
   if (raw === undefined || raw === null) return false;
   if (Array.isArray(raw)) {
-    const joined = raw.map((x) => String(x).trim()).filter(Boolean).join('\n');
+    const joined = raw
+      .map((x) => stripHtmlNoiseForBdd(String(x)))
+      .filter(Boolean)
+      .join('\n');
     return isMeaningful(joined);
   }
-  return isMeaningful(String(raw));
+  return isMeaningful(stripHtmlNoiseForBdd(String(raw)));
 }
 
 /**

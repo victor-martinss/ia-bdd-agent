@@ -14,16 +14,32 @@ function loadPollState(packageRoot) {
   const p = stateFilePath(packageRoot);
   try {
     if (!fs.existsSync(p)) {
-      return { processedIds: [], lastPollAt: null, lastNewTaskIds: [] };
+      return {
+        processedIds: [],
+        lastPollAt: null,
+        lastNewTaskIds: [],
+        lastQueueIds: [],
+        lastScan: null,
+      };
     }
     const data = JSON.parse(fs.readFileSync(p, 'utf8'));
     return {
       processedIds: Array.isArray(data.processedIds) ? data.processedIds.map(Number) : [],
       lastPollAt: data.lastPollAt || null,
       lastNewTaskIds: Array.isArray(data.lastNewTaskIds) ? data.lastNewTaskIds : [],
+      lastQueueIds: Array.isArray(data.lastQueueIds)
+        ? data.lastQueueIds.map((id) => Number(id) || id)
+        : [],
+      lastScan: data.lastScan || null,
     };
   } catch {
-    return { processedIds: [], lastPollAt: null, lastNewTaskIds: [] };
+    return {
+      processedIds: [],
+      lastPollAt: null,
+      lastNewTaskIds: [],
+      lastQueueIds: [],
+      lastScan: null,
+    };
   }
 }
 
@@ -31,9 +47,11 @@ function savePollState(packageRoot, state) {
   const p = stateFilePath(packageRoot);
   fs.mkdirSync(path.dirname(p), { recursive: true });
   const out = {
-    processedIds: state.processedIds,
+    processedIds: state.processedIds || [],
     lastPollAt: state.lastPollAt,
     lastNewTaskIds: state.lastNewTaskIds || [],
+    lastQueueIds: state.lastQueueIds || [],
+    lastScan: state.lastScan || null,
   };
   fs.writeFileSync(p, JSON.stringify(out, null, 2), 'utf8');
 }

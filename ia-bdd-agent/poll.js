@@ -1,499 +1,281 @@
 /**
-
- * Consulta a fila QA do Bitrix em loop e gera BDD conforme o estado do campo de cenários.
-
+ * Fila QA Bitrix: varre todos os itens, destaca novos na fila e gera BDD na hora.
  *
-
- * A cada ciclo analisa **todos** os itens da fila (não só IDs nunca vistos):
-
- * • campo vazio → gera e grava BDD
-
- * • preenchido → ignora (log explícito)
-
- * • preenchido com marcador BITRIX_BDD_APPEND_MARKER → atualiza só o bloco [IA]
-
- *
-
- * Intervalo: BDD_POLL_INTERVAL_SECONDS ou BDD_POLL_INTERVAL_MINUTES (padrão 30s, mín. 10s).
-
+ * • Novo na fila + campo vazio → alerta visual + gera BDD assim que a leitura do item termina
+ * • Novo na fila + já preenchido → alerta visual (não altera)
+ * • Horários nos logs: America/Sao_Paulo (BRT), não UTC
  */
-
 require('./load-env');
 
-
-
 const { getTasks, getTaskDetail } = require('./src/services/bitrix.service');
-
 const { classifyBddQaItemAction } = require('./src/services/push-bdd-to-crm');
-
 const { runBitrixBddCycle } = require('./src/orchestrator/run-bitrix-bdd-cycle');
-
+const { logTimestampBr, formatDateTimeBr, logTimezone } = require('./src/utils/datetime-br');
 const {
-
+  printNewInQueueAlert,
+  printGeneratedSuccess,
+  printGeneratedError,
+  printScanProgress,
+  printCycleSummary,
+} = require('./src/utils/poll-visual');
+const {
   loadPollState,
-
   savePollState,
-
   stateFilePath,
-
   removeIdsFromPollState,
-
   parseForceIdsFromEnv,
-
 } = require('./src/utils/poll-state');
 
-
-
 const PKG = __dirname;
-
 const MIN_INTERVAL_MS = 10_000;
 
-
-
 function resolvePollIntervalMs() {
-
   const secRaw = (process.env.BDD_POLL_INTERVAL_SECONDS || '').trim();
-
   if (secRaw) {
-
     const s = Number.parseFloat(secRaw);
-
     if (Number.isFinite(s) && s > 0) {
-
       return Math.max(MIN_INTERVAL_MS, Math.round(s * 1000));
-
     }
-
   }
-
   const minRaw = (process.env.BDD_POLL_INTERVAL_MINUTES || '').trim();
-
   if (minRaw) {
-
     const m = Number.parseFloat(minRaw);
-
     if (Number.isFinite(m) && m > 0) {
-
       return Math.max(MIN_INTERVAL_MS, Math.round(m * 60 * 1000));
-
     }
-
   }
-
   return Math.max(MIN_INTERVAL_MS, 30 * 1000);
-
 }
-
-
 
 function formatInterval(ms) {
-
   if (ms < 60_000) return `${ms / 1000}s`;
-
   if (ms % 60_000 === 0) return `${ms / 60_000} min`;
-
   return `${Math.round(ms / 1000)}s (${(ms / 60_000).toFixed(2)} min)`;
-
 }
-
-
 
 function normId(id) {
-
   const n = Number(id);
-
   return Number.isFinite(n) ? n : id;
-
 }
-
-
 
 function useLegacyProcessedIdsGate() {
-
   return process.env.BDD_POLL_LEGACY_PROCESSED_IDS === '1';
-
 }
 
-
+function queueDelta(currentTasks, prevQueueIds, hasBaseline) {
+  if (!hasBaseline) {
+    return { newInQueue: [], removedFromQueue: [] };
+  }
+  const prev = new Set((prevQueueIds || []).map(normId));
+  const current = currentTasks.map((t) => normId(t.id));
+  const currentSet = new Set(current);
+  return {
+    newInQueue: current.filter((id) => !prev.has(id)),
+    removedFromQueue: [...prev].filter((id) => !currentSet.has(id)),
+  };
+}
 
 /**
-
  * @param {object[]} tasks
-
  * @param {Set<string|number>} forceSet
-
+ * @param {Set<string|number>} newInQueueSet
+ * @param {(index: number, total: number, task: object) => void} [onProgress]
  */
-
-async function scanQaQueue(tasks, forceSet) {
-
+async function scanAndProcessQaQueue(tasks, forceSet, newInQueueSet, onProgress, legacySeen) {
   const empty = [];
-
   const filled = [];
-
   const merge = [];
-
-  const toProcess = [];
-
   const errors = [];
+  let generated = 0;
+  let skippedFilled = 0;
+  const total = tasks.length;
 
-
-
-  for (const task of tasks) {
-
+  for (let i = 0; i < tasks.length; i++) {
+    const task = tasks[i];
     const id = normId(task.id);
+    if (onProgress) onProgress(i + 1, total, task);
 
     let detail;
-
     try {
-
       detail = await getTaskDetail(task.id);
-
     } catch (e) {
-
       errors.push({ id, title: task.title, error: e.message || String(e) });
-
+      printGeneratedError(id, e.message || String(e));
       continue;
-
     }
 
-
-
-    const classification = classifyBddQaItemAction(detail);
-
+    let classification = classifyBddQaItemAction(detail);
     const row = { id, title: task.title, classification };
-
-
+    const isNewInQueue = newInQueueSet.has(id);
 
     if (forceSet.has(id)) {
-
-      const forcedClass = {
-
+      classification = {
         action: 'generate',
-
         fieldKey: classification.fieldKey,
-
         reason: 'reprocessamento forçado (BDD_POLL_FORCE_IDS)',
-
       };
-
-      toProcess.push({
-
-        ...task,
-
-        _prefetchedDetail: detail,
-
-        _classification: forcedClass,
-
-      });
-
-      empty.push({ ...row, classification: forcedClass });
-
-      continue;
-
+      row.classification = classification;
     }
 
-
+    if (isNewInQueue || forceSet.has(id)) {
+      printNewInQueueAlert(row);
+    } else if (classification.action === 'generate' || classification.action === 'merge') {
+      console.log(
+        `${logTimestampBr()} ○ Item ${id} elegível (${classification.action === 'merge' ? 'atualizar IA' : 'sem cenários'}) — gerando…`
+      );
+    }
 
     if (classification.action === 'generate') {
-
       empty.push(row);
-
-      toProcess.push({ ...task, _prefetchedDetail: detail, _classification: classification });
-
     } else if (classification.action === 'merge') {
-
       merge.push(row);
-
-      toProcess.push({ ...task, _prefetchedDetail: detail, _classification: classification });
-
     } else {
-
       filled.push(row);
-
+      if (isNewInQueue) skippedFilled += 1;
+      continue;
     }
 
+    if (
+      useLegacyProcessedIdsGate() &&
+      legacySeen &&
+      legacySeen.has(id) &&
+      !forceSet.has(id) &&
+      process.env.BDD_POLL_REPROCESS_IN_QUEUE !== '1'
+    ) {
+      continue;
+    }
+
+    try {
+      const result = await runBitrixBddCycle(PKG, {
+        tasks: [
+          {
+            ...task,
+            _prefetchedDetail: detail,
+            _classification: classification,
+          },
+        ],
+        quiet: false,
+      });
+      if (result.processed > 0 && result.crm.ok > 0) {
+        generated += 1;
+        printGeneratedSuccess(row, { ok: true, field: process.env.BITRIX_UF_BDD_FIELD });
+      } else if (result.processed > 0) {
+        generated += 1;
+        printGeneratedSuccess(row, {});
+      } else if (result.crm.skipped) {
+        skippedFilled += 1;
+      }
+    } catch (e) {
+      printGeneratedError(id, e.message || String(e));
+    }
   }
-
-
 
   return {
-
     total: tasks.length,
-
     empty,
-
     filled,
-
     merge,
-
-    toProcess,
-
     errors,
-
+    generated,
+    skippedFilled,
   };
-
 }
-
-
-
-function printQueueSummary(scan) {
-
-  const ts = new Date().toISOString();
-
-  console.log(`\n[${ts}] Fila QA: ${scan.total} item(ns)`);
-
-  console.log(
-
-    `  ○ Sem cenários (gerar BDD): ${scan.empty.length}${
-
-      scan.empty.length
-
-        ? ` — IDs ${scan.empty.map((r) => r.id).join(', ')}`
-
-        : ''
-
-    }`
-
-  );
-
-  console.log(
-
-    `  ● Já preenchidos (ignorados): ${scan.filled.length}${
-
-      scan.filled.length
-
-        ? ` — IDs ${scan.filled
-
-            .slice(0, 20)
-
-            .map((r) => r.id)
-
-            .join(', ')}${scan.filled.length > 20 ? '…' : ''}`
-
-        : ''
-
-    }`
-
-  );
-
-  if (scan.merge.length) {
-
-    console.log(
-
-      `  ◐ Com marcador (atualizar bloco IA): ${scan.merge.length} — IDs ${scan.merge
-
-        .map((r) => r.id)
-
-        .join(', ')}`
-
-    );
-
-  }
-
-  if (scan.errors.length) {
-
-    console.log(
-
-      `  ✕ Erro ao ler CRM: ${scan.errors.map((e) => e.id).join(', ')}`
-
-    );
-
-  }
-
-  const showDetail = scan.filled.length > 0 && scan.filled.length <= 12;
-
-  if (showDetail) {
-
-    for (const r of scan.filled) {
-
-      const fk = r.classification.fieldKey ? ` (${r.classification.fieldKey})` : '';
-
-      console.log(`      · ${r.id} — ${(r.title || 'sem título').slice(0, 72)}${fk}`);
-
-      console.log(`        ↳ ${r.classification.reason}`);
-
-    }
-
-  }
-
-}
-
-
 
 async function tick() {
-
   const state = loadPollState(PKG);
-
   const forceIds = parseForceIdsFromEnv();
-
   const forceSet = new Set(forceIds.map(normId));
 
-
-
   if (forceIds.length) {
-
     removeIdsFromPollState(PKG, forceIds);
-
-    console.log(`Reprocessamento forçado (BDD_POLL_FORCE_IDS): ${forceIds.join(', ')}`);
-
+    console.log(
+      `${logTimestampBr()} Reprocessamento forçado (BDD_POLL_FORCE_IDS): ${forceIds.join(', ')}`
+    );
   }
-
-
 
   const tasks = await getTasks();
+  const hasBaseline =
+    (state.lastQueueIds && state.lastQueueIds.length > 0) || !!state.lastPollAt;
+  const delta = queueDelta(tasks, state.lastQueueIds, hasBaseline);
+  const newInQueueSet = new Set(delta.newInQueue);
+  const legacySeen = new Set((state.processedIds || []).map(normId));
 
-  const scan = await scanQaQueue(tasks, forceSet);
-
-
-
-  printQueueSummary(scan);
-
-
-
-  state.lastPollAt = new Date().toISOString();
-
-  state.lastScan = {
-
-    at: state.lastPollAt,
-
-    total: scan.total,
-
-    emptyIds: scan.empty.map((r) => r.id),
-
-    filledIds: scan.filled.map((r) => r.id),
-
-    mergeIds: scan.merge.map((r) => r.id),
-
-  };
-
-
-
-  let tasksToRun = scan.toProcess;
-
-
-
-  if (useLegacyProcessedIdsGate()) {
-
-    const seen = new Set((state.processedIds || []).map(normId));
-
-    const before = tasksToRun.length;
-
-    tasksToRun = tasksToRun.filter((t) => !seen.has(normId(t.id)));
-
-    if (before !== tasksToRun.length) {
-
-      console.log(
-
-        `  (modo legado BDD_POLL_LEGACY_PROCESSED_IDS=1: ${before - tasksToRun.length} item(ns) já marcados em poll-state — pulados)`
-
-      );
-
-    }
-
+  if (delta.newInQueue.length) {
+    console.log(
+      `\n${logTimestampBr()} ⚡ ${delta.newInQueue.length} teste(s) NOVO(S) detectado(s) na fila QA`
+    );
   }
 
-
-
-  if (process.env.BDD_POLL_REPROCESS_IN_QUEUE === '1') {
-
-    tasksToRun = scan.toProcess;
-
-    console.log('BDD_POLL_REPROCESS_IN_QUEUE=1 — todos os itens elegíveis serão processados.');
-
-  }
-
-
-
-  state.lastNewTaskIds = tasksToRun.map((t) => t.id);
-
-
-
-  if (!tasksToRun.length) {
-
-    savePollState(PKG, state);
-
-    console.log('Nenhum item a gerar/atualizar neste ciclo.');
-
-    return;
-
-  }
-
-
-
-  console.log(
-
-    `\n▶ Gerando BDD para ${tasksToRun.length} item(ns): ${tasksToRun.map((t) => t.id).join(', ')}…`
-
+  const scan = await scanAndProcessQaQueue(
+    tasks,
+    forceSet,
+    newInQueueSet,
+    (index, total, task) => {
+      if (process.env.BDD_POLL_QUIET_PROGRESS === '1') return;
+      printScanProgress(index, total, task.id, task.title);
+    },
+    legacySeen
   );
 
+  printCycleSummary(scan, delta);
 
-
-  const result = await runBitrixBddCycle(PKG, { tasks: tasksToRun, quiet: false });
+  const nowBr = formatDateTimeBr();
+  state.lastPollAt = nowBr;
+  state.lastQueueIds = tasks.map((t) => normId(t.id));
+  state.lastScan = {
+    at: nowBr,
+    total: scan.total,
+    emptyIds: scan.empty.map((r) => r.id),
+    filledIds: scan.filled.map((r) => r.id),
+    mergeIds: scan.merge.map((r) => r.id),
+    newInQueueIds: delta.newInQueue,
+  };
+  state.lastNewTaskIds = [...scan.empty, ...scan.merge].map((r) => r.id);
 
   if (useLegacyProcessedIdsGate()) {
-
     const merged = new Set((state.processedIds || []).map(normId));
-
-    for (const t of tasksToRun) {
-
-      merged.add(normId(t.id));
-
+    for (const r of [...scan.empty, ...scan.merge]) {
+      merged.add(normId(r.id));
     }
-
     state.processedIds = [...merged];
-
   }
-
-
 
   savePollState(PKG, state);
 
-  console.log(
-
-    `Ciclo concluído — ${result.processed} processado(s), CRM: ${result.crm.ok} gravado(s), ${result.crm.skipped} ignorado(s).`
-
-  );
-
+  if (scan.generated > 0) {
+    console.log(
+      `${logTimestampBr()} Ciclo OK — ${scan.generated} BDD gerado(s)/gravado(s).`
+    );
+  } else if (delta.newInQueue.length && scan.skippedFilled > 0) {
+    console.log(
+      `${logTimestampBr()} ${delta.newInQueue.length} novo(s) na fila; cenários QA já existiam (nenhuma gravação).`
+    );
+  } else if (!delta.newInQueue.length && !scan.empty.length && !scan.merge.length) {
+    console.log(`${logTimestampBr()} Nenhuma alteração neste ciclo.`);
+  }
 }
-
-
 
 async function main() {
-
   const intervalMs = resolvePollIntervalMs();
-
-  console.log('ia-bdd-agent — modo fila automática (varredura por estado do campo QA)');
-
+  console.log('ia-bdd-agent — fila QA (alertas visuais + geração imediata)');
   console.log(
-
-    `Intervalo entre consultas: ${formatInterval(intervalMs)} (env: BDD_POLL_INTERVAL_SECONDS ou BDD_POLL_INTERVAL_MINUTES; padrão 30s, mín. 10s)`
-
+    `Horário dos logs: ${logTimezone()} (${formatDateTimeBr()} agora)`
   );
-
+  console.log(
+    `Intervalo: ${formatInterval(intervalMs)} (BDD_POLL_INTERVAL_SECONDS / MINUTES)`
+  );
   console.log(`Estado: ${stateFilePath(PKG)}`);
-
   if (useLegacyProcessedIdsGate()) {
-
-    console.log('Modo legado: BDD_POLL_LEGACY_PROCESSED_IDS=1 (só IDs novos em poll-state).');
-
+    console.log('Modo legado: BDD_POLL_LEGACY_PROCESSED_IDS=1');
   }
-
   console.log('Ctrl+C para encerrar.\n');
 
-
-
   for (;;) {
-
-    await tick().catch(console.error);
-
+    await tick().catch((err) => {
+      console.error(`${logTimestampBr()} Erro no ciclo:`, err.message || err);
+    });
     await new Promise((r) => setTimeout(r, intervalMs));
-
   }
-
 }
 
-
-
 main().catch(console.error);
-
-
