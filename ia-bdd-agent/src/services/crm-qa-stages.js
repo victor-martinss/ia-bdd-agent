@@ -60,6 +60,40 @@ function devStageNameNeedles() {
   ];
 }
 
+/** Esteiras/squads com funil ligado à validação QA (match parcial no nome da categoria). */
+function qaCategoryNameNeedles() {
+  const fromEnv = parseNameList('BITRIX_QA_CATEGORY_NAMES', '');
+  if (fromEnv.length) return fromEnv;
+  return [
+    'dicom',
+    'sustent',
+    'improve',
+    'core',
+    'ngf',
+    'mobile',
+    'portable',
+    'squad',
+    'qualidade',
+    'desenvolvimento q.a',
+    'desenvolvimento qa',
+  ];
+}
+
+function includeAllCategories() {
+  if (process.env.BITRIX_QA_ALL_CATEGORIES === '0') return false;
+  return !(process.env.BITRIX_QA_CATEGORY_NAMES || '').trim();
+}
+
+function categoryMatchesPipeline(categoryName, needles) {
+  if (includeAllCategories()) return true;
+  const name = String(categoryName || '').trim().toLowerCase();
+  if (!name) return false;
+  return needles.some((needle) => {
+    const n = needle.toLowerCase();
+    return name.includes(n) || n.includes(name);
+  });
+}
+
 function stageNameMatchesNeedles(stageName, needles) {
   const name = String(stageName || '').trim().toLowerCase();
   if (!name) return false;
@@ -67,6 +101,22 @@ function stageNameMatchesNeedles(stageName, needles) {
     const n = needle.toLowerCase();
     return name.includes(n) || n === name;
   });
+}
+
+/** Colunas QA com nomes alternativos nas esteiras DICOM / Sustentação / Improve. */
+function looksLikeQaStageName(stageName, devNeedles) {
+  if (stageNameMatchesNeedles(stageName, devNeedles)) return false;
+  if (process.env.BITRIX_QA_BROAD_STAGE_MATCH === '0') return false;
+  const name = String(stageName || '').trim().toLowerCase();
+  if (!name) return false;
+  if (/teste(s)?\s*(de\s*)?q\.?\s*a\.?/i.test(name)) return true;
+  if (/novo\s*teste/i.test(name)) return true;
+  if (/pronto\s+para\s+teste/i.test(name)) return true;
+  if (/em\s+teste(s)?\s*(de\s*)?qa/i.test(name)) return true;
+  if (/valida[cç][aã]o\s*(de\s*)?(qa|qualidade)/i.test(name)) return true;
+  if (/fila\s*(de\s*)?(qa|qualidade|teste)/i.test(name)) return true;
+  if (/\bqa\b/.test(name) && !/dev|desenvolvimento/i.test(name)) return true;
+  return false;
 }
 
 async function fetchCategories(entityTypeId) {
@@ -105,39 +155,81 @@ async function fetchStatusesForCategory(entityTypeId, categoryId) {
 }
 
 /**
- * Resolve STAGE_IDs de colunas QA em **todas** as categorias do SPA.
+ * Resolve colunas QA por categoria (esteira) do SPA.
+ * @returns {Promise<{ stageId: string, categoryId: number, categoryName: string, stageName: string }[]>}
+ */
+async function resolveQaStagesDetailed(entityTypeIdNum) {
+  const needles = qaStageNameNeedles();
+  const devNeedles = devStageNameNeedles();
+  const categoryNeedles = qaCategoryNameNeedles();
+  const rows = [];
+  const categories = await fetchCategories(entityTypeIdNum);
+
+  const catRows = categories.length
+    ? categories.map((c) => ({
+        id: Number(c.id ?? c.ID),
+        name: String(c.name || c.NAME || '').trim(),
+      }))
+    : [{ id: 0, name: 'Padrão' }];
+
+  for (const cat of catRows) {
+    if (!Number.isFinite(cat.id)) continue;
+    if (!categoryMatchesPipeline(cat.name, categoryNeedles)) continue;
+
+    const statuses = await fetchStatusesForCategory(entityTypeIdNum, cat.id);
+    for (const st of statuses) {
+      const stageName = String(st.NAME || st.name || '').trim();
+      const sid = st.STATUS_ID || st.statusId;
+      if (!sid) continue;
+      if (stageNameMatchesNeedles(stageName, devNeedles)) continue;
+      const isQa =
+        stageNameMatchesNeedles(stageName, needles) ||
+        looksLikeQaStageName(stageName, devNeedles);
+      if (!isQa) continue;
+      rows.push({
+        stageId: String(sid),
+        categoryId: cat.id,
+        categoryName: cat.name || `Categoria ${cat.id}`,
+        stageName,
+      });
+    }
+  }
+
+  return rows;
+}
+
+/**
+ * Resolve STAGE_IDs de colunas QA em categorias/esteiras integradas à validação QA.
  */
 async function resolveQaStageIds(entityTypeIdNum) {
   if (qaStageIdsCache.has(entityTypeIdNum)) {
     return qaStageIdsCache.get(entityTypeIdNum);
   }
 
-  const needles = qaStageNameNeedles();
-  const devNeedles = devStageNameNeedles();
-  const matched = new Set();
-  const categories = await fetchCategories(entityTypeIdNum);
+  const detailed = await resolveQaStagesDetailed(entityTypeIdNum);
+  const ids = [...new Set(detailed.map((r) => r.stageId))];
+  qaStageIdsCache.set(entityTypeIdNum, ids);
 
-  const catIds = categories.length
-    ? categories.map((c) => Number(c.id ?? c.ID)).filter(Number.isFinite)
-    : [0];
-
-  for (const catId of catIds) {
-    const statuses = await fetchStatusesForCategory(entityTypeIdNum, catId);
-    for (const st of statuses) {
-      const name = String(st.NAME || st.name || '').trim();
-      const sid = st.STATUS_ID || st.statusId;
-      if (!sid) continue;
-      if (stageNameMatchesNeedles(name, devNeedles)) continue;
-      if (stageNameMatchesNeedles(name, needles)) {
-        matched.add(String(sid));
-      }
+  if (ids.length) {
+    const byCat = new Map();
+    for (const r of detailed) {
+      if (!byCat.has(r.categoryName)) byCat.set(r.categoryName, 0);
+      byCat.set(r.categoryName, byCat.get(r.categoryName) + 1);
     }
+    const resumo = [...byCat.entries()]
+      .map(([nome, n]) => `${nome} (${n} col.)`)
+      .join(', ');
+    console.log(
+      `[Bitrix] SPA ${entityTypeIdNum} — esteiras QA: ${resumo || 'nenhuma'} → ${ids.length} estágio(s) no total`
+    );
   }
 
-  const ids = [...matched];
-  qaStageIdsCache.set(entityTypeIdNum, ids);
   if (ids.length && process.env.DEBUG_BITRIX === '1') {
-    console.log(`[Bitrix] Colunas QA (${ids.length}): ${ids.join(', ')}`);
+    for (const r of detailed) {
+      console.log(
+        `  · ${r.categoryName} / "${r.stageName}" → ${r.stageId}`
+      );
+    }
   }
   return ids;
 }
@@ -198,8 +290,10 @@ function buildStageFilter(qaStageIds) {
 
 module.exports = {
   qaStageNameNeedles,
+  qaCategoryNameNeedles,
   devStageNameNeedles,
   resolveQaStageIds,
+  resolveQaStagesDetailed,
   resolveDevStageIds,
   isQaStageId,
   isDevStageId,
@@ -207,4 +301,5 @@ module.exports = {
   flattenCrmItem,
   buildStageFilter,
   fetchCategories,
+  categoryMatchesPipeline,
 };

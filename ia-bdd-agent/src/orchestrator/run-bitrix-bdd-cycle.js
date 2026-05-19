@@ -50,7 +50,15 @@ async function runBitrixBddCycle(packageRoot, options = {}) {
   const linkedTasks = { updated: 0, failed: 0 };
   for (const task of tasks) {
     try {
-      const detail = task._prefetchedDetail || (await getTaskDetail(task.id));
+      const itemEtId = task._entityTypeId;
+      const detail =
+        task._prefetchedDetail ||
+        (await getTaskDetail(task.id, {
+          entityTypeId: itemEtId,
+        }));
+      if (itemEtId && detail && !detail._entityTypeId) {
+        detail._entityTypeId = itemEtId;
+      }
       const classification =
         task._classification || classifyBddQaItemAction(detail);
 
@@ -83,7 +91,13 @@ async function runBitrixBddCycle(packageRoot, options = {}) {
 
       if (!quiet) {
         console.log('\n==============================');
-        console.log(`TASK: ${task.id} - ${task.title}`);
+        const pipe =
+          task._pipelineName && String(task._pipelineName).trim()
+            ? ` [${task._pipelineName}]`
+            : itemEtId
+              ? ` [SPA ${itemEtId}]`
+              : '';
+        console.log(`TASK: ${task.id} - ${task.title}${pipe}`);
         console.log('==============================');
       }
 
@@ -96,7 +110,7 @@ async function runBitrixBddCycle(packageRoot, options = {}) {
         console.log(`📄 BDD completo (arquivo): ${file}\n`);
       }
 
-      const etId = await getEntityTypeId();
+      const etId = itemEtId || (await getEntityTypeId());
       const stageId = detail && (detail.stageId || detail.STAGE_ID);
       const inQa = stageId ? await isQaStageId(String(stageId), etId) : true;
       const inDev = stageId ? await isDevStageId(String(stageId), etId) : false;
@@ -105,6 +119,7 @@ async function runBitrixBddCycle(packageRoot, options = {}) {
         const crmResult = await pushBddToCrmCenariosQa(task.id, bdd, {
           quiet,
           detail,
+          entityTypeId: etId,
         });
         if (crmResult.ok) crm.ok += 1;
         else if (crmResult.skipped) crm.skipped += 1;

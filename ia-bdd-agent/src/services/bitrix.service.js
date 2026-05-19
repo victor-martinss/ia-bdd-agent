@@ -315,12 +315,32 @@ async function fetchCrmItemsPage(etId, filter, start, limit) {
   return (response.data.result && response.data.result.items) || [];
 }
 
-async function getTasks() {
-  if (!BASE_URL) {
-    throw new Error('BITRIX_WEBHOOK não definido');
-  }
+/**
+ * SPAs consultados na fila QA (poll / bdd): principal + BITRIX_ENTITY_TYPE_IDS + probe 1276/1294.
+ */
+async function listEntityTypeIdsForQueue() {
+  const primary = await getEntityTypeId();
+  return buildEntityTypeIdCandidates(primary);
+}
 
-  const etId = await getEntityTypeId();
+/**
+ * Lista itens na fila QA de um único SPA (entityTypeId).
+ * @param {number} etId
+ */
+async function attachPipelineLabels(etId, items) {
+  const { resolveQaStagesDetailed } = require('./crm-qa-stages');
+  const detailed = await resolveQaStagesDetailed(etId);
+  const stageToPipeline = new Map(
+    detailed.map((r) => [r.stageId, r.categoryName])
+  );
+  return items.map((it) => ({
+    ...it,
+    _pipelineName:
+      stageToPipeline.get(String(it._stageId || it.stageId || '')) || '',
+  }));
+}
+
+async function fetchQaQueueItemsForEntityType(etId) {
   const filter = await buildItemListFilter(etId);
   const limit = listPageSize();
 
@@ -328,16 +348,32 @@ async function getTasks() {
   const cleanFilter = filter ? { ...filter } : {};
   delete cleanFilter.__qaStageIds;
 
+  const normalize = (it) => {
+    const id = it.id ?? it.ID;
+    const title = it.title || it.TITLE || '';
+    const stageId = it.stageId || it.STAGE_ID || '';
+    const categoryId = it.categoryId ?? it.CATEGORY_ID;
+    return {
+      ...it,
+      id,
+      title,
+      _entityTypeId: etId,
+      _queueKey: `${etId}:${id}`,
+      _stageId: stageId,
+      _categoryId: categoryId,
+    };
+  };
+
   if (Array.isArray(qaStageIds) && qaStageIds.length > 1) {
-    const byId = new Map();
+    const byKey = new Map();
     for (const stageId of qaStageIds) {
       let start = 0;
       for (;;) {
         try {
           const items = await fetchCrmItemsPage(etId, { stageId }, start, limit);
           for (const it of items) {
-            const id = it.id ?? it.ID;
-            if (id != null) byId.set(String(id), it);
+            const row = normalize(it);
+            if (row.id != null) byKey.set(row._queueKey, row);
           }
           if (items.length < limit) break;
           start += limit;
@@ -350,7 +386,7 @@ async function getTasks() {
         }
       }
     }
-    return [...byId.values()];
+    return attachPipelineLabels(etId, [...byKey.values()]);
   }
 
   const allItems = [];
@@ -365,13 +401,39 @@ async function getTasks() {
     } catch (e) {
       throw new Error(`crm.item.list: ${e.message || e}`);
     }
-    allItems.push(...items);
+    for (const it of items) {
+      allItems.push(normalize(it));
+    }
     if (items.length < limit) break;
     start += limit;
     if (start > 200000) break;
   }
 
-  return allItems;
+  return attachPipelineLabels(etId, allItems);
+}
+
+async function getTasks() {
+  if (!BASE_URL) {
+    throw new Error('BITRIX_WEBHOOK não definido');
+  }
+
+  const entityIds = await listEntityTypeIdsForQueue();
+  const byKey = new Map();
+
+  for (const etId of entityIds) {
+    const batch = await fetchQaQueueItemsForEntityType(etId);
+    for (const row of batch) {
+      byKey.set(row._queueKey, row);
+    }
+  }
+
+  if (entityIds.length > 1) {
+    console.log(
+      `[Bitrix] Fila QA unificada: ${byKey.size} card(s) em ${entityIds.length} SPA(s) — IDs ${entityIds.join(', ')}`
+    );
+  }
+
+  return [...byKey.values()];
 }
 
 /**
@@ -486,9 +548,12 @@ async function getTaskDetail(id, options = {}) {
   );
 }
 
-async function updateCrmItemFieldsJson(id, fields) {
+async function updateCrmItemFieldsJson(id, fields, entityTypeId) {
   const url = `${BASE_URL}/crm.item.update`;
-  const etId = await getEntityTypeId();
+  const etId =
+    entityTypeId != null && Number.isFinite(Number(entityTypeId))
+      ? Number(entityTypeId)
+      : await getEntityTypeId();
   return axios.post(url, {
     entityTypeId: etId,
     id,
@@ -496,9 +561,12 @@ async function updateCrmItemFieldsJson(id, fields) {
   });
 }
 
-async function updateCrmItemFieldsForm(id, fields) {
+async function updateCrmItemFieldsForm(id, fields, entityTypeId) {
   const url = `${BASE_URL}/crm.item.update`;
-  const etId = await getEntityTypeId();
+  const etId =
+    entityTypeId != null && Number.isFinite(Number(entityTypeId))
+      ? Number(entityTypeId)
+      : await getEntityTypeId();
   const params = new URLSearchParams();
   params.set('entityTypeId', String(etId));
   params.set('id', String(id));
@@ -522,17 +590,19 @@ function logRestDebug(label, response) {
   );
 }
 
-async function updateCrmItemFields(id, fields) {
+async function updateCrmItemFields(id, fields, options = {}) {
   if (!BASE_URL) {
     throw new Error('BITRIX_WEBHOOK não definido');
   }
 
-  let response = await updateCrmItemFieldsJson(id, fields);
+  const etId = options.entityTypeId;
+
+  let response = await updateCrmItemFieldsJson(id, fields, etId);
   logRestDebug('crm.item.update JSON', response);
 
   let msg = restErrorMessage(response.data);
   if (msg) {
-    response = await updateCrmItemFieldsForm(id, fields);
+    response = await updateCrmItemFieldsForm(id, fields, etId);
     logRestDebug('crm.item.update form-urlencoded (retry)', response);
     msg = restErrorMessage(response.data);
   }
@@ -561,6 +631,8 @@ module.exports = {
   /** @deprecated use getEntityTypeId() — mantido para scripts que esperam número síncrono */
   entityTypeId: entityTypeIdSync,
   getTasks,
+  listEntityTypeIdsForQueue,
+  fetchQaQueueItemsForEntityType,
   getTaskDetail,
   updateCrmItemFields,
   fetchSpaTypesList,

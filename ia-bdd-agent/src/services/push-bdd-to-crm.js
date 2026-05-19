@@ -259,11 +259,15 @@ function truncarParaCampoUf(texto) {
  * Grava o BDD no campo do CRM (Teste Q.A., Cenários QA, etc.) — crm.item.update.
  * @param {string|number} taskId
  * @param {string} bdd
- * @param {{ quiet?: boolean, detail?: Record<string, unknown> }} [options]
+ * @param {{ quiet?: boolean, detail?: Record<string, unknown>, entityTypeId?: number }} [options]
  * @returns {Promise<{ ok?: true, skipped?: true, reason?: string, error?: string, field?: string }>}
  */
 async function pushBddToCrmCenariosQa(taskId, bdd, options = {}) {
-  const { quiet = false, detail } = options;
+  const { quiet = false, detail, entityTypeId: entityTypeIdOpt } = options;
+  const entityTypeId =
+    entityTypeIdOpt ??
+    (detail && (detail._entityTypeId || detail.entityTypeId)) ??
+    undefined;
 
   if (process.env.BITRIX_PUSH_BDD_TO_UF === '0') {
     return { skipped: true, reason: 'BITRIX_PUSH_BDD_TO_UF=0' };
@@ -305,7 +309,7 @@ async function pushBddToCrmCenariosQa(taskId, bdd, options = {}) {
   let lastError = '';
   for (const field of candidates) {
     try {
-      await updateCrmItemFields(taskId, { [field]: valor });
+      await updateCrmItemFields(taskId, { [field]: valor }, { entityTypeId });
       if (!quiet) {
         console.log(`📝 CRM atualizado: ${field} (item ${taskId})`);
       }

@@ -58,6 +58,13 @@ function normId(id) {
   return Number.isFinite(n) ? n : id;
 }
 
+function taskQueueKey(task) {
+  if (task && task._queueKey) return String(task._queueKey);
+  const et = task && task._entityTypeId;
+  const id = normId(task && task.id);
+  return et ? `${et}:${id}` : String(id);
+}
+
 function useLegacyProcessedIdsGate() {
   return process.env.BDD_POLL_LEGACY_PROCESSED_IDS === '1';
 }
@@ -66,12 +73,12 @@ function queueDelta(currentTasks, prevQueueIds, hasBaseline) {
   if (!hasBaseline) {
     return { newInQueue: [], removedFromQueue: [] };
   }
-  const prev = new Set((prevQueueIds || []).map(normId));
-  const current = currentTasks.map((t) => normId(t.id));
+  const prev = new Set((prevQueueIds || []).map(String));
+  const current = currentTasks.map((t) => taskQueueKey(t));
   const currentSet = new Set(current);
   return {
-    newInQueue: current.filter((id) => !prev.has(id)),
-    removedFromQueue: [...prev].filter((id) => !currentSet.has(id)),
+    newInQueue: current.filter((key) => !prev.has(key)),
+    removedFromQueue: [...prev].filter((key) => !currentSet.has(key)),
   };
 }
 
@@ -93,11 +100,15 @@ async function scanAndProcessQaQueue(tasks, forceSet, newInQueueSet, onProgress,
   for (let i = 0; i < tasks.length; i++) {
     const task = tasks[i];
     const id = normId(task.id);
+    const queueKey = taskQueueKey(task);
     if (onProgress) onProgress(i + 1, total, task);
 
     let detail;
     try {
-      detail = await getTaskDetail(task.id);
+      detail = await getTaskDetail(task.id, {
+        entityTypeId: task._entityTypeId,
+      });
+      if (task._entityTypeId) detail._entityTypeId = task._entityTypeId;
     } catch (e) {
       errors.push({ id, title: task.title, error: e.message || String(e) });
       printGeneratedError(id, e.message || String(e));
@@ -105,8 +116,15 @@ async function scanAndProcessQaQueue(tasks, forceSet, newInQueueSet, onProgress,
     }
 
     let classification = classifyBddQaItemAction(detail);
-    const row = { id, title: task.title, classification };
-    const isNewInQueue = newInQueueSet.has(id);
+    const row = {
+      id,
+      title: task.title,
+      classification,
+      pipeline: task._pipelineName,
+      entityTypeId: task._entityTypeId,
+      queueKey,
+    };
+    const isNewInQueue = newInQueueSet.has(queueKey);
 
     if (forceSet.has(id)) {
       classification = {
@@ -221,7 +239,7 @@ async function tick() {
 
   const nowBr = formatDateTimeBr();
   state.lastPollAt = nowBr;
-  state.lastQueueIds = tasks.map((t) => normId(t.id));
+  state.lastQueueIds = tasks.map((t) => taskQueueKey(t));
   state.lastScan = {
     at: nowBr,
     total: scan.total,

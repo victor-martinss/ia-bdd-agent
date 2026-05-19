@@ -56,6 +56,14 @@ function printNewInQueueAlert(row) {
       paint(c.dim, ts)
   );
   console.log(paint(c.cyan, `   ${titulo}`));
+  if (row.pipeline) {
+    console.log(
+      paint(c.dim, `   Esteira: ${row.pipeline}`) +
+        (row.entityTypeId ? paint(c.dim, ` · SPA ${row.entityTypeId}`) : '')
+    );
+  } else if (row.entityTypeId) {
+    console.log(paint(c.dim, `   SPA entityTypeId=${row.entityTypeId}`));
+  }
 
   if (classification.action === 'generate') {
     console.log(
