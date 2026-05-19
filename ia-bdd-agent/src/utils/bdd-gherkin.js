@@ -249,6 +249,137 @@ function normalizarLinhaGherkin(line) {
 }
 
 /**
+ * Junta passos de várias fontes (Dev, descrição, passos NGF) sem duplicar.
+ * @param {...string} fontes
+ */
+function mergePassosFontes(...fontes) {
+  const items = [];
+  const seen = new Set();
+  for (const f of fontes) {
+    if (!f || !limparTexto(f)) continue;
+    for (const p of extrairPassosDoTexto(f)) {
+      const key = p.toLowerCase().replace(/\s+/g, ' ').slice(0, 80);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      items.push(p);
+    }
+  }
+  return items.join('\n');
+}
+
+/**
+ * Divide o campo "Cenários de Teste (Dev)" em blocos (um por cenário Dev).
+ * @param {string} texto
+ * @returns {{ title: string|null, body: string, lines: string[] }[]}
+ */
+function parseCenariosDevBlocos(texto) {
+  const bruto = String(texto || '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .trim();
+  if (!limparTexto(bruto)) return [];
+
+  const porCenario = bruto.split(/(?=^\s*(?:cenário|cenario)\s*:)/gim).filter((c) => limparTexto(c));
+  if (porCenario.length > 1) {
+    return porCenario.map((chunk) => parseDevChunk(chunk));
+  }
+
+  const porMarcador = bruto.split(/(?=\[\s*cenário|\{\s*cenário)/gi).filter((c) => limparTexto(c));
+  if (porMarcador.length > 1) {
+    return porMarcador.map((chunk) => parseDevChunk(chunk));
+  }
+
+  const porNumero = bruto.split(/(?=^\s*\d+\s*(?:[-–—.)]+)\s)/m).filter((c) => limparTexto(c));
+  if (porNumero.length > 1) {
+    return porNumero.map((chunk, i) => parseDevChunk(chunk, `Passo ${i + 1}`));
+  }
+
+  return [parseDevChunk(bruto, null)];
+}
+
+function parseDevChunk(chunk, tituloFallback = null) {
+  const lines = chunk.split(/\r?\n/).map((l) => l.trimEnd());
+  const first = (lines.find((l) => l.trim()) || '').trim();
+  let title = tituloFallback;
+
+  const mCen = first.match(/^(?:cenário|cenario)\s*:\s*(.+)$/i);
+  if (mCen) {
+    title = mCen[1].trim();
+    lines.shift();
+  } else {
+    const mMarc = first.match(/\[\s*cenário[^\]]*\]\s*:?\s*(.*)$/i);
+    if (mMarc) {
+      title = (mMarc[1] || first).trim() || tituloFallback;
+    }
+  }
+
+  const body = lines.join('\n').trim();
+  return { title: title || null, body, lines: lines.filter((l) => l.trim()) };
+}
+
+function extrairLinhasGherkinDoBloco(lines) {
+  const gherkin = [];
+  for (const line of lines || []) {
+    if (linhaJaEhGherkin(line)) {
+      const norm = normalizarLinhaGherkin(line);
+      if (norm) gherkin.push(norm);
+    }
+  }
+  return gherkin;
+}
+
+/**
+ * Cenário QA derivado de um bloco Dev + descrição/passos/resultado da tarefa.
+ */
+function cenarioQaAPartirDoDev(bloco, ctx, nomeFuncionalidade) {
+  const sufixo = bloco.title ? bloco.title.replace(/\s+/g, ' ').slice(0, 80) : 'baseado no cenário Dev';
+  const out = [`Cenário: ${nomeFuncionalidade} — ${sufixo}`];
+
+  const gherkinDev = extrairLinhasGherkinDoBloco(bloco.lines);
+  if (gherkinDev.length >= 2) {
+    const temDado = gherkinDev.some((l) => /^\s*Dado/i.test(l));
+    if (!temDado) out.push(...montarDadosIniciais(ctx));
+    for (const ln of gherkinDev) {
+      if (/^\s*Dado/i.test(ln) && !temDado) continue;
+      out.push(ln);
+    }
+    if (!gherkinDev.some((l) => /^\s*Então/i.test(l))) {
+      const entao = entaoDoContexto(ctx);
+      if (entao) out.push(entao);
+    }
+    return out;
+  }
+
+  out.push(...montarDadosIniciais(ctx));
+  const passosMerged = mergePassosFontes(ctx.passos, ctx.descricao, bloco.body);
+  out.push(...passosParaStepsGherkin(passosMerged));
+  const entao = entaoDoContexto(ctx);
+  out.push(entao || '  Então o sistema atende ao resultado esperado do chamado');
+  return out;
+}
+
+function entaoDoContexto(ctx) {
+  if (!ctx || !limparTexto(ctx.resultadoEsperado)) {
+    return '  Então o comportamento deve estar alinhado à regra de negócio do chamado';
+  }
+  const entao = objetivarFrase(primeiraFrase(ctx.resultadoEsperado));
+  return entao
+    ? `  Então ${entao}`
+    : '  Então o sistema deve exibir o resultado esperado para o fluxo';
+}
+
+/**
+ * Cenário principal QA a partir da descrição e passos da tarefa (sem bloco Dev).
+ */
+function cenarioPrincipalNgf(ctx, nomeFuncionalidade) {
+  const out = [`Cenário: ${nomeFuncionalidade} — validação principal`];
+  out.push(...montarDadosIniciais(ctx));
+  out.push(...passosParaStepsGherkin(resolverPassosReproducao(ctx)));
+  out.push(entaoDoContexto(ctx));
+  return out;
+}
+
+/**
  * Converte bloco "Cenários de Teste (Dev)" em passos E resumidos.
  */
 function devCenariosParaPassosE(texto) {
@@ -319,8 +450,14 @@ function ctxTemCamposEstruturados(ctx) {
   );
 }
 
-/** Passos para Quando: prioriza campo passos; senão extrai da descrição. */
+/** Passos para Quando: passos NGF + trechos da descrição + itens do Dev. */
 function resolverPassosReproducao(ctx) {
+  const merged = mergePassosFontes(
+    ctx.passos,
+    ctx.descricao,
+    ctx.cenariosTesteDev
+  );
+  if (merged) return merged;
   if (limparTexto(ctx.passos)) return ctx.passos;
   if (limparTexto(ctx.descricao)) return ctx.descricao;
   return '';
@@ -411,6 +548,11 @@ module.exports = {
   passoGherkin,
   passosParaStepsGherkin,
   extrairPassosDoTexto,
+  mergePassosFontes,
+  parseCenariosDevBlocos,
+  cenarioQaAPartirDoDev,
+  cenarioPrincipalNgf,
+  entaoDoContexto,
   devCenariosParaPassosE,
   montarDadosIniciais,
   removerRotulos,

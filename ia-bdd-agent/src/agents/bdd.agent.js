@@ -13,11 +13,14 @@ const {
   entaoAPartirDoTitulo,
   resolverPassosReproducao,
   sanitizarFeatureBdd,
+  parseCenariosDevBlocos,
+  cenarioQaAPartirDoDev,
+  cenarioPrincipalNgf,
+  entaoDoContexto,
 } = require('../utils/bdd-gherkin');
 
 /**
- * BDD determinístico a partir dos campos do CRM (sem LLM).
- * Cenários objetivos em Dado / Quando / Então / E — sem colar descrições inteiras.
+ * BDD determinístico: cenários Dev como modelo + descrição/passos/resultado da tarefa → cenários QA.
  */
 function buildStructuredBdd(title, ctx) {
   const nomeFuncionalidade = ctx.titulo || title;
@@ -26,29 +29,45 @@ function buildStructuredBdd(title, ctx) {
   out.push(`Funcionalidade: ${nomeFuncionalidade}`);
   out.push('');
 
-  const soTitulo = !ctxTemCamposEstruturados(ctx);
+  const blocosDev = parseCenariosDevBlocos(ctx.cenariosTesteDev);
+  const temNgf = ctxTemCamposEstruturados(ctx);
+  const soTitulo = !temNgf && !blocosDev.length;
 
-  out.push(`Cenário: ${nomeFuncionalidade} — validação principal`);
-  out.push(...montarDadosIniciais(ctx));
-  out.push(...devCenariosParaPassosE(ctx.cenariosTesteDev));
-
-  if (soTitulo) {
-    out.push(...passosAPartirDoTitulo(nomeFuncionalidade));
-    out.push(entaoAPartirDoTitulo(nomeFuncionalidade));
-  } else {
-    out.push(...passosParaStepsGherkin(resolverPassosReproducao(ctx)));
-    if (ctx.resultadoEsperado) {
-      const entao = objetivarFrase(primeiraFrase(ctx.resultadoEsperado));
-      out.push(
-        entao
-          ? `  Então ${entao}`
-          : '  Então o sistema deve exibir o resultado esperado para o fluxo'
-      );
-    } else {
-      out.push('  Então o comportamento deve estar alinhado à regra de negócio do chamado');
+  if (blocosDev.length > 0) {
+    for (const bloco of blocosDev) {
+      out.push(...cenarioQaAPartirDoDev(bloco, ctx, nomeFuncionalidade));
+      out.push('');
     }
   }
-  out.push('');
+
+  if (temNgf && blocosDev.length === 0) {
+    out.push(...cenarioPrincipalNgf(ctx, nomeFuncionalidade));
+    out.push('');
+  } else if (temNgf && blocosDev.length > 0) {
+    const temPassosNgf =
+      resolverPassosReproducao({
+        ...ctx,
+        cenariosTesteDev: '',
+      }).trim().length > 0;
+    if (temPassosNgf) {
+      out.push(`Cenário: ${nomeFuncionalidade} — validação (descrição e passos da tarefa)`);
+      out.push(...montarDadosIniciais(ctx));
+      out.push(
+        ...passosParaStepsGherkin(
+          resolverPassosReproducao({ ...ctx, cenariosTesteDev: '' })
+        )
+      );
+      out.push(entaoDoContexto(ctx));
+      out.push('');
+    }
+  } else if (soTitulo) {
+    out.push(`Cenário: ${nomeFuncionalidade} — validação principal`);
+    out.push(...montarDadosIniciais(ctx));
+    out.push(...devCenariosParaPassosE(ctx.cenariosTesteDev));
+    out.push(...passosAPartirDoTitulo(nomeFuncionalidade));
+    out.push(entaoAPartirDoTitulo(nomeFuncionalidade));
+    out.push('');
+  }
 
   if (ctx.resultadoObtido && ctx.resultadoEsperado) {
     out.push(`Cenário: ${nomeFuncionalidade} — comportamento observado (defeito)`);
@@ -72,18 +91,46 @@ function buildStructuredBdd(title, ctx) {
       const melhoria = objetivarFrase(ctx.sugestaoMelhoria);
       if (melhoria) out.push(`  Quando a melhoria for implementada: ${melhoria}`);
     }
-    out.push('  Então o sistema deve atender ao objetivo da melhoria sem regressões no fluxo existente');
+    out.push(
+      '  Então o sistema deve atender ao objetivo da melhoria sem regressões no fluxo existente'
+    );
     out.push('');
   }
 
   return sanitizarFeatureBdd(out.join('\n'));
 }
 
+function montarInputLlm(title, ctx, description) {
+  const partes = [`Título: ${title}`];
+  if (ctx.cenariosTesteDev) {
+    partes.push(
+      '\nCenários de Teste (Dev) — use como modelo principal para os cenários QA:\n' +
+        ctx.cenariosTesteDev
+    );
+  }
+  if (ctx.descricao) {
+    partes.push('\nDescrição do ocorrido:\n' + ctx.descricao);
+  }
+  if (ctx.passos) {
+    partes.push('\nPassos para reproduzir:\n' + ctx.passos);
+  }
+  if (ctx.resultadoEsperado) {
+    partes.push('\nResultado esperado:\n' + ctx.resultadoEsperado);
+  }
+  if (ctx.resultadoObtido) {
+    partes.push('\nResultado obtido:\n' + ctx.resultadoObtido);
+  }
+  if (!ctx.cenariosTesteDev && !ctx.descricao && !ctx.passos) {
+    partes.push('\n' + description);
+  }
+  return partes.join('\n');
+}
+
 async function generateBDD(title, item) {
   const description = extractDescription(item);
   const ctx = extractTaskContext(item);
 
-  if (!description.trim()) {
+  if (!description.trim() && !ctxTemCamposEstruturados(ctx)) {
     return '# Não foi possível gerar BDD (sem título ou descrição utilizável no CRM)\n';
   }
 
@@ -95,7 +142,7 @@ async function generateBDD(title, item) {
   if (useLlm) {
     const promptPath = path.join(__dirname, '../../prompts/bdd.txt');
     const tpl = fs.readFileSync(promptPath, 'utf8');
-    const input = `Título: ${title}\n\n${description}`;
+    const input = montarInputLlm(title, ctx, description);
     const prompt = tpl.replace('{{INPUT}}', input);
     const raw = await runIA(prompt);
     return filtrarRespostaBdd(raw);
@@ -104,9 +151,6 @@ async function generateBDD(title, item) {
   return buildStructuredBdd(title, ctx);
 }
 
-/**
- * Mantém só bloco Gherkin útil (remove lixo antes/depois se o modelo falar demais).
- */
 function filtrarRespostaBdd(texto) {
   if (!texto || typeof texto !== 'string') return String(texto);
   const t = texto.trim();

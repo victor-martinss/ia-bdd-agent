@@ -1,6 +1,11 @@
 Você é um QA especialista em BDD.
 
-Com base nos campos do chamado abaixo (título, descrição, passos, resultados), gere cenários em português.
+Com base nos campos do chamado abaixo, gere cenários QA em português.
+
+PRIORIDADE DAS FONTES:
+1. "Cenários de Teste (Dev)" — use como MODELO principal (cada cenário Dev vira um ou mais cenários QA equivalentes).
+2. Descrição do ocorrido e Passos para reproduzir — enriquecem Dado/Quando/Então dos cenários QA.
+3. Resultado esperado (e obtido, se houver) — define o Então de verificação.
 
 REGRAS OBRIGATÓRIAS:
 1. Use apenas: Funcionalidade, Cenário, Dado que, Quando, Então, E.

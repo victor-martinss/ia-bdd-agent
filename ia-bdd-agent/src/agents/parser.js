@@ -65,52 +65,39 @@ function appendCenariosDeTesteDev(base, ctx) {
   return `${b}\n\n${block}`;
 }
 
+const { pickCrmUfText } = require('../utils/crm-field-resolver');
+
 /**
- * Campos do CRM Bitrix (entity 1276 / NGF) usados para QA e BDD.
+ * Campos do CRM Bitrix (NGF — ufCrm94 / ufCrm100) usados para QA e BDD.
  */
 function extractTaskContext(raw) {
   const item = flattenItem(raw);
   return {
     titulo:
       (isMeaningful(item.title) && texto(item.title)) ||
-      (isMeaningful(item.ufCrm94NgfTitulo) && texto(item.ufCrm94NgfTitulo)) ||
+      pickCrmUfText(item, ['NgfTitulo']) ||
       '',
 
-    descricao: isMeaningful(item.ufCrm94NgfDescricaoDoOcorrido)
-      ? texto(item.ufCrm94NgfDescricaoDoOcorrido)
-      : '',
+    descricao: pickCrmUfText(item, ['NgfDescricaoDoOcorrido', 'DescricaoDoOcorrido']),
 
-    passos: isMeaningful(item.ufCrm94NgfPassosParaReproduzir)
-      ? texto(item.ufCrm94NgfPassosParaReproduzir)
-      : '',
+    passos: pickCrmUfText(item, ['NgfPassosParaReproduzir', 'PassosParaReproduzir']),
 
-    resultadoEsperado: isMeaningful(item.ufCrm94NgfResultadoEsperado)
-      ? texto(item.ufCrm94NgfResultadoEsperado)
-      : '',
+    resultadoEsperado: pickCrmUfText(item, ['NgfResultadoEsperado', 'ResultadoEsperado']),
 
-    resultadoObtido: isMeaningful(item.ufCrm94NgfResultadoObtido)
-      ? texto(item.ufCrm94NgfResultadoObtido)
-      : '',
+    resultadoObtido: pickCrmUfText(item, ['NgfResultadoObtido', 'ResultadoObtido']),
 
-    sugestaoMelhoria: isMeaningful(item.ufCrm94NgfSugestaoDeMelhoria)
-      ? texto(item.ufCrm94NgfSugestaoDeMelhoria)
-      : '',
+    sugestaoMelhoria: pickCrmUfText(item, ['NgfSugestaoDeMelhoria', 'SugestaoDeMelhoria']),
 
-    motivoMelhoria: isMeaningful(item.ufCrm94NgfMotivoDeMelhoria)
-      ? texto(item.ufCrm94NgfMotivoDeMelhoria)
-      : '',
+    motivoMelhoria: pickCrmUfText(item, ['NgfMotivoDeMelhoria', 'MotivoDeMelhoria']),
 
-    observacoes: isMeaningful(item.ufCrm94NgfObservacoes)
-      ? texto(item.ufCrm94NgfObservacoes)
-      : '',
+    observacoes: pickCrmUfText(item, ['NgfObservacoes']),
 
-    observacoesHu: isMeaningful(item.ufCrm94ObservacoesParaGeracaoHu)
-      ? texto(item.ufCrm94ObservacoesParaGeracaoHu)
-      : '',
+    observacoesHu: pickCrmUfText(item, ['ObservacoesParaGeracaoHu']),
 
-    observacoesTriagem: isMeaningful(item.ufCrm94NgfObservacoesDaTriagemDeQualidade)
-      ? texto(item.ufCrm94NgfObservacoesDaTriagemDeQualidade)
-      : '',
+    observacoesTriagem: pickCrmUfText(item, [
+      'NgfObservacoesDaTriagemDeQualidade',
+      'ObservacoesDaTriagem',
+    ]),
 
     cenariosTesteDev: (() => {
       const v = textoCenariosTesteDevFromItem(item);
