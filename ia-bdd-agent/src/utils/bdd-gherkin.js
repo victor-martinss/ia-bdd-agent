@@ -3,6 +3,12 @@
  * Lê descrição/passos/resultados e resume — nunca cola parágrafos inteiros no cenário.
  */
 
+const {
+  detectAmbiente,
+  dadoAcessaAmbiente,
+  onlyTitleAndDevSources,
+} = require('./bdd-ambiente');
+
 const MAX_PASSO_CHARS =
   Number.parseInt(process.env.BDD_MAX_STEP_CHARS || '100', 10) || 100;
 const MAX_PASSO_PALAVRAS =
@@ -158,7 +164,7 @@ function objetivarFrase(frase, maxLen = MAX_PASSO_CHARS) {
   if (!f) return '';
 
   const verbosAcao =
-    /^(informa|clica|acessa|envia|visualiza|preenche|seleciona|abre|cadastra|exporta|tenta|valida|confirma|realiza|inicia|sai|alterna|fecha|entra|configura|cria|aguarda|compara|verifica|anota|selecionar|configurar|criar|aguardar|comparar|verificar|anotar|cadastrar|enviar|clicar|informar|acessar|visualizar|preencher|abrir|exportar|validar|confirmar|iniciar|sair|alternar|fechar|entrar|realizar)/i;
+    /^(informa|clica|acessa|envia|visualiza|preenche|seleciona|abre|cadastra|exporta|tenta|valida|confirma|realiza|inicia|sai|alterna|fecha|entra|configura|cria|aguarda|compara|verifica|anota|aplica|registra|abre|selecionar|configurar|criar|aguardar|comparar|verificar|anotar|aplicar|registrar|cadastrar|enviar|clicar|informar|acessar|visualizar|preencher|abrir|exportar|validar|confirmar|iniciar|sair|alternar|fechar|entrar|realizar)/i;
   if (verbosAcao.test(f)) {
     f = f
       .replace(/^cadastrar\b/i, 'cadastra')
@@ -188,7 +194,9 @@ function objetivarFrase(frase, maxLen = MAX_PASSO_CHARS) {
       .replace(/^verificar\b/i, 'verifica')
       .replace(/^anotar\b/i, 'anota')
       .replace(/^confirmar\b/i, 'confirma')
-      .replace(/^selecionar\b/i, 'seleciona');
+      .replace(/^selecionar\b/i, 'seleciona')
+      .replace(/^aplicar\b/i, 'aplica')
+      .replace(/^registrar\b/i, 'registra');
     if (!/^o usuário\s/i.test(f)) {
       f = `o usuário ${f.charAt(0).toLowerCase()}${f.slice(1)}`;
     }
@@ -398,6 +406,9 @@ function parseCenariosDevBlocos(texto) {
   if (!limparTexto(bruto)) return [];
 
   const porCenario = bruto.split(/(?=^\s*(?:cenário|cenario)\s*:)/gim).filter((c) => limparTexto(c));
+  if (porCenario.length >= 1 && /(?:cenário|cenario)\s*:/i.test(bruto)) {
+    return porCenario.map((chunk) => parseDevChunk(chunk));
+  }
   if (porCenario.length > 1) {
     return porCenario.map((chunk) => parseDevChunk(chunk));
   }
@@ -457,14 +468,13 @@ function cenarioQaAPartirDoDev(bloco, ctx, nomeFuncionalidade) {
 
   const gherkinDev = extrairLinhasGherkinDoBloco(bloco.lines);
   if (gherkinDev.length >= 2) {
-    const temDado = gherkinDev.some((l) => /^\s*Dado/i.test(l));
-    if (!temDado) out.push(...montarDadosIniciais(ctx));
+    out.push(...montarDadosIniciais(ctx));
     for (const ln of gherkinDev) {
-      if (/^\s*Dado/i.test(ln) && !temDado) continue;
+      if (/^\s*Dado/i.test(ln)) continue;
       out.push(ln);
     }
     if (!gherkinDev.some((l) => /^\s*Então/i.test(l))) {
-      const entao = entaoDoContexto(ctx);
+      const entao = entaoDoContexto(ctx, bloco.body);
       if (entao) out.push(entao);
     }
     return out;
@@ -473,22 +483,35 @@ function cenarioQaAPartirDoDev(bloco, ctx, nomeFuncionalidade) {
   out.push(...montarDadosIniciais(ctx));
   const passosMerged =
     bloco.body && limparTexto(bloco.body)
-      ? mergePassosFontes(bloco.body, ctx.passos)
-      : mergePassosFontes(ctx.passos, ctx.descricao);
+      ? mergePassosFontes(
+          bloco.body,
+          onlyTitleAndDevSources() ? '' : ctx.passos
+        )
+      : onlyTitleAndDevSources()
+        ? ''
+        : mergePassosFontes(ctx.passos, ctx.descricao);
   const quando = passosParaStepsGherkin(passosMerged);
   if (quando.length) out.push(...quando);
   else out.push('  Quando o usuário executa os passos descritos no cenário Dev');
-  const entao = entaoDoContexto(ctx);
+  const entao = entaoDoContexto(ctx, bloco.body);
   out.push(entao || '  Então o resultado na tela corresponde ao esperado');
   return out;
 }
 
-function entaoDoContexto(ctx) {
-  if (!ctx || !limparTexto(ctx.resultadoEsperado)) {
-    return '  Então o resultado exibido corresponde ao comportamento esperado';
+function entaoDoContexto(ctx, textoDevFallback = '') {
+  if (!onlyTitleAndDevSources() && ctx && limparTexto(ctx.resultadoEsperado)) {
+    const entao = entaoVerificavel(ctx.resultadoEsperado);
+    return entao ? `  Então ${entao}` : '  Então o resultado exibido corresponde ao esperado';
   }
-  const entao = entaoVerificavel(ctx.resultadoEsperado);
-  return entao ? `  Então ${entao}` : '  Então o resultado exibido corresponde ao esperado';
+  const fromDev = String(textoDevFallback || '')
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .find((l) => /^ent[aã]o\s/i.test(l));
+  if (fromDev) {
+    const ev = entaoVerificavel(fromDev.replace(/^ent[aã]o\s*/i, ''));
+    if (ev) return `  Então ${ev}`;
+  }
+  return '  Então o comportamento descrito no cenário Dev é observado na tela';
 }
 
 /**
@@ -570,16 +593,15 @@ function inferirModuloDoTitulo(titulo) {
 }
 
 function montarDadosIniciais(ctx) {
-  const out = [];
-  const modulo = inferirModuloDoTitulo(ctx.titulo);
-  if (modulo) {
-    out.push(`  Dado que o usuário está autenticado no ${modulo}`);
-  } else {
-    out.push('  Dado que o usuário está autenticado no sistema');
-  }
-  const ctxResumo = ctx.descricao ? precondicaoDaDescricao(ctx.descricao) : '';
-  if (ctxResumo && !linhaEhRotuloChamado(ctxResumo)) {
-    out.push(`    E ${ctxResumo}`);
+  const ambiente =
+    (ctx && ctx.ambiente) || detectAmbiente(ctx && ctx.titulo, ctx && ctx.cenariosTesteDev);
+  const out = [dadoAcessaAmbiente(ambiente)];
+
+  if (!onlyTitleAndDevSources() && ctx && ctx.descricao) {
+    const ctxResumo = precondicaoDaDescricao(ctx.descricao);
+    if (ctxResumo && !linhaEhRotuloChamado(ctxResumo)) {
+      out.push(`    E ${ctxResumo}`);
+    }
   }
   return out;
 }
@@ -712,6 +734,7 @@ module.exports = {
   entaoDoContexto,
   devCenariosParaPassosE,
   montarDadosIniciais,
+  inferirModuloDoTitulo,
   removerRotulos,
   ctxTemCamposEstruturados,
   passosAPartirDoTitulo,

@@ -1,5 +1,9 @@
 # Vocabulário Mobilemed (use nos passos — não invente telas fora desta lista)
 
+## Ambiente no Dado (obrigatório em todo cenário)
+- Formato: `Dado que o usuário acessa o ambiente [nome]`
+- Exemplos: Portal Web (Mobilemed), Portal Vet, Portal de Entregas, Worklist, Portable (Desktop), DICOM Viewer Web, Aplicativo Mobile, Worklist e Portal Web (Mobilemed).
+
 ## Produtos e módulos
 - **Portal / Portal Mobilemed**: navegador; login; exames; protocolo do paciente; laudos; cadastros web.
 - **Portal Vet**: variante veterinária do portal.

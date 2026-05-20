@@ -8,7 +8,8 @@ DIRETRIZES
 - Funcionalidade: nome do módulo + tema curto.
 - Pelo menos 1 cenário "validação principal" com todos os passos de reprodução detalhados.
 - Se o Dev já listou cenários, replique cada um como Cenário QA com nome derivado do título Dev.
-- Dado: autenticação no módulo + dados mínimos para executar (ex.: "existe exame na Worklist", "paciente com CPF cadastrado").
+- Dado obrigatório: "Dado que o usuário acessa o ambiente [detectado no título/Dev]".
+- Além dos cenários Dev, inclua 1–3 cenários extras de cobertura (smoke, negativo, integração).
 - Então: alinhado ao resultado esperado, em linguagem de checklist ("é exibido", "permanece", "é igual a").
 - Só inclua cenário negativo ou edge se o chamado mencionar.
 

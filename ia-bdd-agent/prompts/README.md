@@ -27,6 +27,13 @@ BDD_PROMPT_MODE=auto
 # BDD_PROMPT_AUTO=1
 
 # Incluir bdd-vocab.txt no prompt. Desligar: BDD_INCLUDE_VOCAB=0
+
+# Fontes: só título + Cenários Dev (padrão ligado). Dado: "acessa o ambiente …"
+# BDD_ONLY_TITLE_AND_DEV=1
+
+# Cenários extras além do Dev (smoke, negativo, integração). Máximo:
+# BDD_COVERAGE_EXTRA=1
+# BDD_COVERAGE_MAX_EXTRA=3
 ```
 
 ## Outros

@@ -5,16 +5,23 @@ Transformar o chamado em passos que qualquer testador consiga seguir sem ler o t
 
 {{VOCAB}}
 
-FONTES (prioridade)
-1. Cenários de Teste (Dev) — 1 cenário QA por cenário Dev; mesma ordem e intenção.
-2. Passos para reproduzir — cada item vira Quando ou E (nunca o rótulo "passos para reproduzir").
-3. Descrição do ocorrido — só pré-condição curta no Dado (contexto do bug/melhoria).
-4. Resultado esperado — Então verificável; resultado obtido — cenário "defeito observado".
+FONTES (use SOMENTE o que vier no bloco Chamado abaixo)
+1. Título do card.
+2. Cenários de Teste (Dev) — converta cada um em cenário QA.
+3. NÃO use descrição, passos NGF ou resultado esperado do CRM (não são enviados).
+
+AMBIENTE (obrigatório)
+- Analise título + Dev e identifique: Portal Web (Mobilemed), Portal Vet, Portal de Entregas, Worklist, Portable (Desktop), DICOM Viewer Web, Aplicativo Mobile ou Web.
+- Em TODO cenário, a primeira linha de passo é:
+  Dado que o usuário acessa o ambiente [nome detectado]
+
+COBERTURA ALÉM DO DEV
+- Gere os cenários equivalentes ao Dev E cenários extras de cobertura (smoke, validação negativa, integração, interrupção de fluxo) quando fizer sentido — quantidade adicional, não só espelhar o Dev.
 
 ESTRUTURA DE CADA CENÁRIO
 Funcionalidade: [módulo] — [assunto em até 12 palavras]
-Cenário: [ação + objeto] — [tipo: validação principal | regressão | defeito observado]
-  Dado que o usuário está autenticado em [módulo] E [pré-condição do chamado em 1 frase]
+Cenário: [ação + objeto] — [tipo: validação | cobertura | regressão]
+  Dado que o usuário acessa o ambiente [Portal Web / Portable / Worklist / …]
   Quando o usuário [primeira ação concreta]
   E o usuário [ações seguintes, uma por linha]
   Então [o que deve aparecer ou não aparecer na tela]
