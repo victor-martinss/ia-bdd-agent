@@ -73,6 +73,13 @@ function printNewInQueueAlert(row) {
     console.log(
       paint(c.yellow + c.bold, '   ▶ Cenários com marcador — atualizando bloco [IA]…')
     );
+  } else if (classification.action === 'skip_qa_history') {
+    console.log(
+      paint(c.yellow + c.bold, '   ⊘ RETORNO APÓS QA — não gera cenários (já passou por teste)')
+    );
+    if (classification.reason) {
+      console.log(paint(c.dim, `     ${classification.reason}`));
+    }
   } else {
     const fk = classification.fieldKey ? ` (${classification.fieldKey})` : '';
     console.log(
@@ -159,6 +166,11 @@ function printCycleSummary(scan, delta) {
   if (scan.merge.length) {
     console.log(
       paint(c.cyan, `  ◐ Atualizar bloco IA: ${scan.merge.map((r) => r.id).join(', ')}`)
+    );
+  }
+  if (scan.skippedQaHistory > 0) {
+    console.log(
+      paint(c.yellow, `  ⊘ Retorno após QA (histórico): ${scan.skippedQaHistory}`)
     );
   }
   if (scan.errors.length) {

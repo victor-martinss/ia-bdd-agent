@@ -1,6 +1,6 @@
 const path = require('path');
 const fs = require('fs');
-const { runIA } = require('../services/ia.service');
+const { runIA, isLlmEnabled } = require('../services/ia.service');
 const { extractDescription, extractTaskContext } = require('./parser');
 const {
   objetivarFrase,
@@ -126,6 +126,25 @@ function montarInputLlm(title, ctx, description) {
   return partes.join('\n');
 }
 
+function bddLlmOutputValido(texto) {
+  if (!texto || typeof texto !== 'string') return false;
+  const t = texto.trim();
+  if (t.length < 40) return false;
+  if (/^#\s*Não foi possível gerar BDD/i.test(t)) return false;
+  if (/^#\s*Erro ao gerar BDD/i.test(t)) return false;
+  if (!/funcionalidade\s*:/i.test(t) && !/cenário\s*:/i.test(t)) return false;
+  return true;
+}
+
+async function generateBddViaLlm(title, ctx, description) {
+  const promptPath = path.join(__dirname, '../../prompts/bdd.txt');
+  const tpl = fs.readFileSync(promptPath, 'utf8');
+  const input = montarInputLlm(title, ctx, description);
+  const prompt = tpl.replace('{{INPUT}}', input);
+  const raw = await runIA(prompt);
+  return filtrarRespostaBdd(raw);
+}
+
 async function generateBDD(title, item) {
   const description = extractDescription(item);
   const ctx = extractTaskContext(item);
@@ -134,31 +153,53 @@ async function generateBDD(title, item) {
     return '# Não foi possível gerar BDD (sem título ou descrição utilizável no CRM)\n';
   }
 
-  const useLlm =
-    process.env.BDD_USE_LLM === '1' &&
-    process.env.OLLAMA_URL &&
-    process.env.MODEL;
+  const structured = () => buildStructuredBdd(title, ctx);
 
-  if (useLlm) {
-    const promptPath = path.join(__dirname, '../../prompts/bdd.txt');
-    const tpl = fs.readFileSync(promptPath, 'utf8');
-    const input = montarInputLlm(title, ctx, description);
-    const prompt = tpl.replace('{{INPUT}}', input);
-    const raw = await runIA(prompt);
-    return filtrarRespostaBdd(raw);
+  if (!isLlmEnabled()) {
+    return structured();
   }
 
-  return buildStructuredBdd(title, ctx);
+  try {
+    const fromLlm = await generateBddViaLlm(title, ctx, description);
+    if (bddLlmOutputValido(fromLlm)) {
+      return fromLlm;
+    }
+    console.warn('[BDD] resposta OpenAI/LLM fora do padrão Gherkin — fallback estruturado');
+  } catch (e) {
+    console.warn(
+      `[BDD] IA (${process.env.BDD_AI_PROVIDER || 'auto'}) falhou — fallback estruturado: ${e.message || e}`
+    );
+  }
+
+  return structured();
 }
 
 function filtrarRespostaBdd(texto) {
-  if (!texto || typeof texto !== 'string') return String(texto);
-  const t = texto.trim();
+  if (!texto || typeof texto !== 'string') return '';
+  let t = texto.trim();
+
+  const fence = t.match(/```(?:gherkin|feature)?\s*([\s\S]*?)```/i);
+  if (fence && fence[1]) t = fence[1].trim();
+
+  t = t.replace(/^[\s\S]*?(?=funcionalidade\s*:|cenário\s*:)/i, '');
+
   const idxFunc = t.search(/funcionalidade\s*:/i);
   const idxCen = t.search(/cenário\s*:/i);
   const start = idxFunc >= 0 ? idxFunc : idxCen >= 0 ? idxCen : 0;
   const cortado = t.slice(start).trim() || t;
-  return sanitizarFeatureBdd(cortado);
+
+  const semMeta = cortado
+    .split(/\r?\n/)
+    .filter((line) => {
+      const l = line.trim();
+      if (!l) return true;
+      if (/^(claro|aqui está|segue|note que|com base)/i.test(l)) return false;
+      if (/^#{1,2}\s+(?!cenário|funcionalidade)/i.test(l)) return false;
+      return true;
+    })
+    .join('\n');
+
+  return sanitizarFeatureBdd(semMeta);
 }
 
-module.exports = { generateBDD, buildStructuredBdd };
+module.exports = { generateBDD, buildStructuredBdd, filtrarRespostaBdd, bddLlmOutputValido };

@@ -8,7 +8,7 @@
 require('./load-env');
 
 const { getTasks, getTaskDetail } = require('./src/services/bitrix.service');
-const { classifyBddQaItemAction } = require('./src/services/push-bdd-to-crm');
+const { classifyBddQaItemActionAsync } = require('./src/services/push-bdd-to-crm');
 const { runBitrixBddCycle } = require('./src/orchestrator/run-bitrix-bdd-cycle');
 const { logTimestampBr, formatDateTimeBr, logTimezone } = require('./src/utils/datetime-br');
 const {
@@ -95,6 +95,7 @@ async function scanAndProcessQaQueue(tasks, forceSet, newInQueueSet, onProgress,
   const errors = [];
   let generated = 0;
   let skippedFilled = 0;
+  let skippedQaHistory = 0;
   const total = tasks.length;
 
   for (let i = 0; i < tasks.length; i++) {
@@ -115,7 +116,7 @@ async function scanAndProcessQaQueue(tasks, forceSet, newInQueueSet, onProgress,
       continue;
     }
 
-    let classification = classifyBddQaItemAction(detail);
+    let classification = await classifyBddQaItemActionAsync(detail);
     const row = {
       id,
       title: task.title,
@@ -137,7 +138,10 @@ async function scanAndProcessQaQueue(tasks, forceSet, newInQueueSet, onProgress,
 
     if (isNewInQueue || forceSet.has(id)) {
       printNewInQueueAlert(row);
-    } else if (classification.action === 'generate' || classification.action === 'merge') {
+    } else if (
+      classification.action === 'generate' ||
+      classification.action === 'merge'
+    ) {
       console.log(
         `${logTimestampBr()} ○ Item ${id} elegível (${classification.action === 'merge' ? 'atualizar IA' : 'sem cenários'}) — gerando…`
       );
@@ -147,6 +151,15 @@ async function scanAndProcessQaQueue(tasks, forceSet, newInQueueSet, onProgress,
       empty.push(row);
     } else if (classification.action === 'merge') {
       merge.push(row);
+    } else if (classification.action === 'skip_qa_history') {
+      filled.push(row);
+      skippedQaHistory += 1;
+      if (isNewInQueue) {
+        console.log(
+          `${logTimestampBr()} ⊘ Item ${id} — retorno após QA (histórico); não gera cenários. ${classification.reason || ''}`
+        );
+      }
+      continue;
     } else {
       filled.push(row);
       if (isNewInQueue) skippedFilled += 1;
@@ -196,6 +209,7 @@ async function scanAndProcessQaQueue(tasks, forceSet, newInQueueSet, onProgress,
     errors,
     generated,
     skippedFilled,
+    skippedQaHistory,
   };
 }
 

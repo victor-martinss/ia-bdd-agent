@@ -2,7 +2,7 @@ const path = require('path');
 const { getTasks, getTaskDetail } = require('../services/bitrix.service');
 const {
   pushBddToCrmCenariosQa,
-  classifyBddQaItemAction,
+  classifyBddQaItemActionAsync,
 } = require('../services/push-bdd-to-crm');
 const { pushBddToLinkedBitrixTasks } = require('../services/push-bdd-to-linked-tasks');
 const { pushBddToQaLinkedCrmItems } = require('../services/push-bdd-to-qa-linked-crm');
@@ -60,9 +60,12 @@ async function runBitrixBddCycle(packageRoot, options = {}) {
         detail._entityTypeId = itemEtId;
       }
       const classification =
-        task._classification || classifyBddQaItemAction(detail);
+        task._classification || (await classifyBddQaItemActionAsync(detail));
 
-      if (classification.action === 'skip_filled') {
+      if (
+        classification.action === 'skip_filled' ||
+        classification.action === 'skip_qa_history'
+      ) {
         if (!quiet) {
           console.log('\n==============================');
           console.log(`TASK: ${task.id} - ${task.title}`);

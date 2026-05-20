@@ -7,6 +7,7 @@ const {
   bddQaStorageFieldAlreadyFilled,
   bddQaStorageFirstFilledFieldKey,
 } = require('./push-bdd-to-crm');
+const { itemTemHistoricoQa } = require('./crm-qa-history');
 const {
   resolveQaStageIds,
   resolveDevStageIds,
@@ -153,6 +154,16 @@ async function pushBddToQaLinkedCrmItems(sourceItemId, bdd, options = {}) {
 
   for (const row of qaItems) {
     const childDetail = await getTaskDetail(row.id);
+    const hist = await itemTemHistoricoQa(childDetail || {});
+    if (hist.has) {
+      skippedAlreadyFilled += 1;
+      if (!quiet) {
+        console.log(
+          `📎 Card QA ${row.id} (${row.title || 'sem título'}) — histórico QA (retorno); não gera cenários. ${hist.reason}`
+        );
+      }
+      continue;
+    }
     if (bddQaStorageFieldAlreadyFilled(childDetail || {})) {
       skippedAlreadyFilled += 1;
       if (!quiet) {

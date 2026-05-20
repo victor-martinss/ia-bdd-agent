@@ -1,5 +1,6 @@
 const { updateCrmItemFields } = require('./bitrix.service');
 const { isMeaningful, flattenItem } = require('../agents/parser');
+const { itemTemHistoricoQa, qaHistoryCheckEnabled } = require('./crm-qa-history');
 const {
   defaultAppendMarker,
   mergeFeatureEnabled,
@@ -189,7 +190,7 @@ function bddQaCrmPushWouldOverwriteWithoutMerge(detail) {
 /**
  * Próxima ação para um item da fila QA (poll / ciclo).
  * @param {Record<string, unknown> | null | undefined} detail
- * @returns {{ action: 'generate'|'merge'|'skip_filled', fieldKey?: string|null, reason: string }}
+ * @returns {{ action: 'generate'|'merge'|'skip_filled'|'skip_qa_history', fieldKey?: string|null, reason: string }}
  */
 function classifyBddQaItemAction(detail) {
   const flat = flattenItem(detail || {});
@@ -233,6 +234,27 @@ function classifyBddQaItemAction(detail) {
     fieldKey,
     reason: 'cenários QA já preenchidos — não altera conteúdo aprovado/manual',
   };
+}
+
+/**
+ * Classificação + checagem de histórico QA (retorno após reprovação).
+ * @param {Record<string, unknown> | null | undefined} detail
+ */
+async function classifyBddQaItemActionAsync(detail) {
+  const base = classifyBddQaItemAction(detail);
+  if (!qaHistoryCheckEnabled() || base.action !== 'generate') {
+    return base;
+  }
+
+  const hist = await itemTemHistoricoQa(detail);
+  if (hist.has) {
+    return {
+      action: 'skip_qa_history',
+      fieldKey: base.fieldKey,
+      reason: hist.reason,
+    };
+  }
+  return base;
 }
 
 function bddPodePublicarNoCrm(bdd) {
@@ -341,6 +363,7 @@ module.exports = {
   bddQaStorageFieldAlreadyFilled,
   bddQaCrmPushWouldOverwriteWithoutMerge,
   classifyBddQaItemAction,
+  classifyBddQaItemActionAsync,
   qaBddFieldTextFromFlat,
   bddQaStorageFirstFilledFieldKey,
   fieldKeysForBddPresenceCheck,

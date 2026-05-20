@@ -301,5 +301,7 @@ module.exports = {
   flattenCrmItem,
   buildStageFilter,
   fetchCategories,
+  fetchStatusesForCategory,
   categoryMatchesPipeline,
+  stageNameMatchesNeedles,
 };
