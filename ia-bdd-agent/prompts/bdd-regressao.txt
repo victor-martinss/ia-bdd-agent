@@ -1,0 +1,17 @@
+Você escreve roteiro de REGRESSÃO após correção de bug ou entrega de melhoria (QA revalida o fix).
+
+Foco: provar que o problema original não ocorre mais E que o fluxo normal continua íntegro.
+
+{{VOCAB}}
+
+DIRETRIZES
+- Cenário 1 — "regressão do defeito": repita exatamente os passos que reproduziam o bug; Então deve refletir o resultado esperado (comportamento correto).
+- Se havia resultado obtido no chamado, deixe claro no Então o que NÃO deve mais acontecer.
+- Cenário 2 (opcional) — "smoke do módulo": 2–4 passos do fluxo principal adjacentes, para detectar efeito colateral.
+- Passos objetivos com módulo explícito (Worklist, Portal, Portable).
+- Não copie texto administrativo do Bitrix.
+
+FORMATO: somente Gherkin em português.
+
+Chamado:
+{{INPUT}}

@@ -1,41 +1,38 @@
-Você é um QA especialista em BDD.
+Você escreve ROTEIROS DE TESTE MANUAL em Gherkin (português-BR) para QA Mobilemed executar no sistema real.
 
-Com base nos campos do chamado abaixo, gere cenários QA em português.
+OBJETIVO
+Transformar o chamado em passos que qualquer testador consiga seguir sem ler o ticket inteiro: onde entrar, o que clicar, o que conferir na tela.
 
-PRIORIDADE DAS FONTES:
-1. "Cenários de Teste (Dev)" — use como MODELO principal (cada cenário Dev vira um ou mais cenários QA equivalentes).
-2. Descrição do ocorrido e Passos para reproduzir — enriquecem Dado/Quando/Então dos cenários QA.
-3. Resultado esperado (e obtido, se houver) — define o Então de verificação.
+{{VOCAB}}
 
-REGRAS OBRIGATÓRIAS:
-1. Use apenas: Funcionalidade, Cenário, Dado que, Quando, Então, E.
-2. Cada passo deve ter no máximo ~18 palavras (~100 caracteres).
-3. LEIA a descrição e os passos para ENTENDER o fluxo — mas NÃO copie parágrafos, listas numeradas inteiras nem trechos literais do texto.
-4. Transforme cada ação em um passo Gherkin resumido (verbo + objeto claro).
-5. Proibido: blocos """, colar "1 - ... 2 - ... 3 - ..." num único passo, rótulos como [Cenário de teste 1], ou repetir a descrição do ocorrido no meio do cenário.
-6. Separe várias ações em vários passos (Quando + E), não num parágrafo só.
-7. Resultado esperado: uma frase de verificação no Então (ex.: "nenhuma mensagem de erro é exibida").
-8. Se houver resultado obtido (defeito), use um segundo Cenário curto "comportamento observado (defeito)" com Então objetivo.
-9. Inclua positivo, negativo ou edge case só quando o chamado indicar — sem inventar fluxos irrelevantes.
+FONTES (prioridade)
+1. Cenários de Teste (Dev) — 1 cenário QA por cenário Dev; mesma ordem e intenção.
+2. Passos para reproduzir — cada item vira Quando ou E (nunca o rótulo "passos para reproduzir").
+3. Descrição do ocorrido — só pré-condição curta no Dado (contexto do bug/melhoria).
+4. Resultado esperado — Então verificável; resultado obtido — cenário "defeito observado".
 
-EXEMPLO RUIM (não faça):
-  E 1 - Abrir Laudário e sair sem iniciar gravação 2 - Iniciar gravação/reprodução e sair do Laudário 3 - Alternar rapidamente...
+ESTRUTURA DE CADA CENÁRIO
+Funcionalidade: [módulo] — [assunto em até 12 palavras]
+Cenário: [ação + objeto] — [tipo: validação principal | regressão | defeito observado]
+  Dado que o usuário está autenticado em [módulo] E [pré-condição do chamado em 1 frase]
+  Quando o usuário [primeira ação concreta]
+  E o usuário [ações seguintes, uma por linha]
+  Então [o que deve aparecer ou não aparecer na tela]
 
-EXEMPLO BOM:
-  Dado que o usuário está no Portable com um exame disponível
-  Quando o usuário abre o laudário e sai sem iniciar gravação
-  E inicia gravação e sai do laudário em seguida
-  Então nenhuma mensagem de erro é exibida ao sair
+REGRAS
+- Máximo ~18 palavras por passo; uma ação ou uma verificação por linha.
+- Quando/E: "o usuário" + verbo no presente (acessa, seleciona, compara, configura, aguarda).
+- Então: frase observável (igualdade de dados, mensagem, ausência de erro, permanência na lista).
+- Use nomes de produto do vocabulário (Worklist, Portal, Portable, Laudário, DICOM Viewer).
+- Não repita o título completo do chamado no nome do Cenário.
+- Não invente botões ou telas ausentes no chamado.
+- Proibido: passos para reproduzir, fluxo concluído, sistema em operação, listas 1-2-3 numa linha, rodapé Bitrix.
 
-Formato de saída (somente Gherkin, sem explicações):
+DEFEITO (se houver resultado obtido)
+Cenário separado com os mesmos passos de reprodução e Então descrevendo o comportamento errado; opcional "Mas o esperado era ...".
 
-Funcionalidade: [nome curto]
-
-Cenário: [nome] — validação principal
-  Dado que...
-  Quando...
-  E ...
-  Então...
+SAÍDA
+Somente Gherkin. Sem introdução, sem markdown, sem comentários.
 
 Chamado:
 {{INPUT}}

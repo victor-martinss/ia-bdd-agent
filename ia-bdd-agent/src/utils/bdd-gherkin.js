@@ -16,6 +16,74 @@ function limparTexto(s) {
     .replace(/^["'`]+|["'`]+$/g, '');
 }
 
+/** Remove rodapés administrativos do Bitrix (evidências, nomes, "tarefa aberta"). */
+function stripTextoAdministrativo(texto) {
+  let t = limparTexto(texto);
+  if (!t) return '';
+
+  t = t
+    .replace(
+      /\b(tarefa\s+aberta|evid[eê]ncias?|enviadas?\s+por|solicita(?:do)?|pela?\s+[\w.]+\s*NQ|inf\s+e\s+evid[eê]ncias?).*$/gi,
+      ''
+    )
+    .replace(/\b(isabelly|mobilemed)\s*\w*$/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+
+  return t;
+}
+
+/** Rótulos de formulário que não são passos de teste. */
+function linhaEhRotuloChamado(texto) {
+  const t = limparTexto(texto).toLowerCase();
+  if (!t || t.length < 4) return true;
+  return (
+    /^passos?\s+(para\s+)?reproduzir\.?$/i.test(t) ||
+    /^descri[çc][aã]o(\s+do\s+ocorrido)?\.?$/i.test(t) ||
+    /^contexto\.?$/i.test(t) ||
+    /^resultado\s+(esperado|obtido)\.?$/i.test(t) ||
+    /^cen[aá]rio\s+de\s+teste\.?$/i.test(t) ||
+    /^inf\s+e\s+evid/i.test(t)
+  );
+}
+
+/** Nome curto da funcionalidade (módulo), sem squad/FEATURE repetido. */
+function nomeFuncionalidadeCurto(titulo) {
+  let t = stripTextoAdministrativo(String(titulo || ''));
+  if (!t) return 'Funcionalidade do chamado';
+
+  const partes = t.split(/\s*[-–—]\s*/).map((p) => p.trim()).filter(Boolean);
+  if (partes.length >= 2) {
+    const mod = partes[0].replace(/^\[?\s*FEATURE\s*\]?\s*/i, '').trim();
+    const fluxo = partes.slice(1).join(' — ').slice(0, 90);
+    return fluxo ? `${mod} — ${fluxo}` : mod;
+  }
+
+  return t.slice(0, 120);
+}
+
+/** Transforma resultado esperado/obtido em frase verificável para Então. */
+function entaoVerificavel(texto) {
+  let t = stripTextoAdministrativo(primeiraFrase(texto) || texto);
+  if (!t) return '';
+
+  t = t
+    .replace(/^é\s+exibid[oa]\s+(a\s+)?mensagem\s*:?\s*/i, 'exibe a mensagem ')
+    .replace(/^deve\s+ser\s+/i, 'é ')
+    .replace(/^deve\s+/i, '')
+    .replace(/^deverá\s+/i, '')
+    .replace(/^o\s+sistema\s+deve\s+/i, '')
+    .replace(/^o\s+sistema\s+/i, '')
+    .trim();
+
+  t = objetivarFrase(t, 110);
+  if (!t) return '';
+
+  if (/^(o|a|os|as|nenhum|nenhuma)\s/i.test(t)) return t;
+  if (/^(exibe|apresenta|permanece|são|está|continua)/i.test(t)) return t;
+  return t;
+}
+
 function primeiraFrase(texto) {
   const t = limparTexto(texto);
   if (!t) return '';
@@ -78,8 +146,11 @@ function objetivarFrase(frase, maxLen = MAX_PASSO_CHARS) {
 
   f = f
     .replace(/^(mesmo\s+com|apesar\s+de|quando|se)\s+/i, '')
-    .replace(/^é\s+exibid[oa]\s+(a\s+)?mensagem\s*:?\s*/i, 'exibe a mensagem ')
-    .replace(/^o\s+usuário\s+/i, '')
+    .replace(/^é\s+exibid[oa]\s+(a\s+)?mensagem\s*:?\s*/i, 'exibe a mensagem ');
+  if (!/^(está|esta|são|é|existe|há|o\s+usuário)/i.test(f)) {
+    f = f.replace(/^o\s+usuário\s+/i, '');
+  }
+  f = f
     .replace(/^que\s+/i, '')
     .replace(/\s+/g, ' ')
     .trim();
@@ -87,7 +158,7 @@ function objetivarFrase(frase, maxLen = MAX_PASSO_CHARS) {
   if (!f) return '';
 
   const verbosAcao =
-    /^(informa|clica|acessa|envia|visualiza|preenche|seleciona|abre|cadastra|exporta|tenta|valida|confirma|realiza|inicia|sai|alterna|fecha|entra|cadastrar|enviar|verificar|clicar|informar|acessar|visualizar|preencher|selecionar|abrir|exportar|validar|confirmar|iniciar|sair|alternar|fechar|entrar|realizar)/i;
+    /^(informa|clica|acessa|envia|visualiza|preenche|seleciona|abre|cadastra|exporta|tenta|valida|confirma|realiza|inicia|sai|alterna|fecha|entra|configura|cria|aguarda|compara|verifica|anota|selecionar|configurar|criar|aguardar|comparar|verificar|anotar|cadastrar|enviar|clicar|informar|acessar|visualizar|preencher|abrir|exportar|validar|confirmar|iniciar|sair|alternar|fechar|entrar|realizar)/i;
   if (verbosAcao.test(f)) {
     f = f
       .replace(/^cadastrar\b/i, 'cadastra')
@@ -109,10 +180,22 @@ function objetivarFrase(frase, maxLen = MAX_PASSO_CHARS) {
       .replace(/^sair\b/i, 'sai')
       .replace(/^alternar\b/i, 'alterna')
       .replace(/^fechar\b/i, 'fecha')
-      .replace(/^entrar\b/i, 'entra');
+      .replace(/^entrar\b/i, 'entra')
+      .replace(/^configurar\b/i, 'configura')
+      .replace(/^criar\b/i, 'cria')
+      .replace(/^aguardar\b/i, 'aguarda')
+      .replace(/^comparar\b/i, 'compara')
+      .replace(/^verificar\b/i, 'verifica')
+      .replace(/^anotar\b/i, 'anota')
+      .replace(/^confirmar\b/i, 'confirma')
+      .replace(/^selecionar\b/i, 'seleciona');
     if (!/^o usuário\s/i.test(f)) {
       f = `o usuário ${f.charAt(0).toLowerCase()}${f.slice(1)}`;
     }
+  }
+
+  if (/^(está|esta|são|é|existe|há|permanece|continua)/i.test(f) && !/^o\s+usuário/i.test(f)) {
+    f = `o usuário ${f.charAt(0).toLowerCase()}${f.slice(1)}`;
   }
 
   f = limitarPalavras(f);
@@ -150,10 +233,22 @@ function passoGherkin(tipo, texto) {
  * @param {string} texto
  * @returns {string[]}
  */
-function extrairPassosDoTexto(texto) {
-  if (!texto || !limparTexto(texto)) return [];
+function preservarQuebrasDeLinha(texto) {
+  return String(texto || '')
+    .trim()
+    .replace(/\r\n/g, '\n')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n[ \t]+/g, '\n')
+    .replace(
+      /^(descrição|contexto|passo|resultado|observação)\s*(do\s+ocorrido)?\s*:\s*/gim,
+      ''
+    );
+}
 
-  const bruto = removerRotulos(texto);
+function extrairPassosDoTexto(texto) {
+  if (!texto || !preservarQuebrasDeLinha(texto)) return [];
+
+  const bruto = preservarQuebrasDeLinha(texto);
   const encontrados = [];
 
   const marcadores = bruto.match(/\d+\s*(?:[-–—.)]+)\s/g) || [];
@@ -169,6 +264,7 @@ function extrairPassosDoTexto(texto) {
   for (const raw of bruto.split(/\r?\n/)) {
     const line = raw.trim();
     if (!line || line.length < 3) continue;
+    if (linhaEhRotuloChamado(line)) continue;
 
     const mNum = line.match(/^\d+\s*(?:[-–—.)]+)\s*(.+)$/);
     if (mNum && mNum[1]) {
@@ -186,7 +282,17 @@ function extrairPassosDoTexto(texto) {
     }
 
     if (line.length >= 4 && !passoEhColagemDescricao(line)) {
-      encontrados.push(line);
+      const subPassos = line.split(
+        /\s+e\s+(?=(?:verificar|validar|confirmar|comparar|acessar|abrir|visualizar|anotar)\b)/i
+      );
+      if (subPassos.length > 1) {
+        for (const sp of subPassos) {
+          const t = sp.trim();
+          if (t.length >= 4) encontrados.push(t);
+        }
+      } else {
+        encontrados.push(line);
+      }
     }
   }
 
@@ -213,7 +319,7 @@ function passosParaStepsGherkin(passos, opts = {}) {
 
   const partes = extrairPassosDoTexto(passos);
   if (!partes.length) {
-    return ['  Quando o usuário executa o fluxo principal do chamado'];
+    return [];
   }
 
   const linhas = [];
@@ -221,14 +327,15 @@ function passosParaStepsGherkin(passos, opts = {}) {
 
   for (const p of partes) {
     if (linhas.length >= maxLinhas) break;
+    if (linhaEhRotuloChamado(p)) continue;
     const corpo = objetivarFrase(p);
-    if (!corpo || vistos.has(corpo)) continue;
+    if (!corpo || vistos.has(corpo) || linhaEhRotuloChamado(corpo)) continue;
     vistos.add(corpo);
     if (linhas.length === 0) linhas.push(`  Quando ${corpo}`);
     else linhas.push(`    E ${corpo}`);
   }
 
-  return linhas.length ? linhas : ['  Quando o usuário executa o fluxo principal do chamado'];
+  return linhas;
 }
 
 function linhaJaEhGherkin(line) {
@@ -240,11 +347,22 @@ function normalizarLinhaGherkin(line) {
   const m = t.match(/^(dado|quando|então|entao|e)\s*(que\s+)?(.+)$/i);
   if (!m) return null;
   const tipo = m[1].toLowerCase();
-  const resto = objetivarFrase(m[3] || '');
+  const bruto = (m[3] || '').trim();
+
+  if (tipo === 'entao' || tipo === 'então') {
+    const ev = entaoVerificavel(bruto) || objetivarFrase(bruto);
+    return ev ? `  Então ${ev}` : null;
+  }
+
+  if (tipo === 'dado') {
+    if (/^o\s+usuário\s+/i.test(bruto)) return `  Dado que ${bruto}`;
+    const prep = objetivarFrase(bruto) || bruto;
+    return prep ? `  Dado que ${prep}` : null;
+  }
+
+  const resto = objetivarFrase(bruto);
   if (!resto) return null;
-  if (tipo === 'dado') return `  Dado que ${resto}`;
   if (tipo === 'quando') return `  Quando ${resto}`;
-  if (tipo === 'entao' || tipo === 'então') return `  Então ${resto}`;
   return `    E ${resto}`;
 }
 
@@ -332,8 +450,10 @@ function extrairLinhasGherkinDoBloco(lines) {
  * Cenário QA derivado de um bloco Dev + descrição/passos/resultado da tarefa.
  */
 function cenarioQaAPartirDoDev(bloco, ctx, nomeFuncionalidade) {
-  const sufixo = bloco.title ? bloco.title.replace(/\s+/g, ' ').slice(0, 80) : 'baseado no cenário Dev';
-  const out = [`Cenário: ${nomeFuncionalidade} — ${sufixo}`];
+  const nomeCenario = bloco.title
+    ? bloco.title.replace(/\s+/g, ' ').slice(0, 100)
+    : `${nomeFuncionalidadeCurto(nomeFuncionalidade)} — validação`;
+  const out = [`Cenário: ${nomeCenario}`];
 
   const gherkinDev = extrairLinhasGherkinDoBloco(bloco.lines);
   if (gherkinDev.length >= 2) {
@@ -351,30 +471,36 @@ function cenarioQaAPartirDoDev(bloco, ctx, nomeFuncionalidade) {
   }
 
   out.push(...montarDadosIniciais(ctx));
-  const passosMerged = mergePassosFontes(ctx.passos, ctx.descricao, bloco.body);
-  out.push(...passosParaStepsGherkin(passosMerged));
+  const passosMerged =
+    bloco.body && limparTexto(bloco.body)
+      ? mergePassosFontes(bloco.body, ctx.passos)
+      : mergePassosFontes(ctx.passos, ctx.descricao);
+  const quando = passosParaStepsGherkin(passosMerged);
+  if (quando.length) out.push(...quando);
+  else out.push('  Quando o usuário executa os passos descritos no cenário Dev');
   const entao = entaoDoContexto(ctx);
-  out.push(entao || '  Então o sistema atende ao resultado esperado do chamado');
+  out.push(entao || '  Então o resultado na tela corresponde ao esperado');
   return out;
 }
 
 function entaoDoContexto(ctx) {
   if (!ctx || !limparTexto(ctx.resultadoEsperado)) {
-    return '  Então o comportamento deve estar alinhado à regra de negócio do chamado';
+    return '  Então o resultado exibido corresponde ao comportamento esperado';
   }
-  const entao = objetivarFrase(primeiraFrase(ctx.resultadoEsperado));
-  return entao
-    ? `  Então ${entao}`
-    : '  Então o sistema deve exibir o resultado esperado para o fluxo';
+  const entao = entaoVerificavel(ctx.resultadoEsperado);
+  return entao ? `  Então ${entao}` : '  Então o resultado exibido corresponde ao esperado';
 }
 
 /**
  * Cenário principal QA a partir da descrição e passos da tarefa (sem bloco Dev).
  */
 function cenarioPrincipalNgf(ctx, nomeFuncionalidade) {
-  const out = [`Cenário: ${nomeFuncionalidade} — validação principal`];
+  const nomeCurto = nomeFuncionalidadeCurto(nomeFuncionalidade);
+  const out = [`Cenário: ${nomeCurto} — validação principal`];
   out.push(...montarDadosIniciais(ctx));
-  out.push(...passosParaStepsGherkin(resolverPassosReproducao(ctx)));
+  const quando = passosParaStepsGherkin(resolverPassosReproducao(ctx));
+  if (quando.length) out.push(...quando);
+  else out.push('  Quando o usuário reproduz o fluxo descrito no chamado');
   out.push(entaoDoContexto(ctx));
   return out;
 }
@@ -432,10 +558,29 @@ function precondicaoDaDescricao(descricao) {
   return objetivarFrase(frase, 80);
 }
 
+function inferirModuloDoTitulo(titulo) {
+  const t = stripTextoAdministrativo(String(titulo || ''));
+  if (!t) return '';
+  const partes = t.split(/\s*[-–—]\s*/).map((p) => p.trim()).filter(Boolean);
+  const mod = (partes[0] || t)
+    .replace(/^\[?\s*FEATURE\s*\]?\s*/i, '')
+    .replace(/^squad\s+\w+\s*-\s*/i, '')
+    .trim();
+  return mod.slice(0, 60);
+}
+
 function montarDadosIniciais(ctx) {
-  const out = ['  Dado que o sistema está em operação'];
+  const out = [];
+  const modulo = inferirModuloDoTitulo(ctx.titulo);
+  if (modulo) {
+    out.push(`  Dado que o usuário está autenticado no ${modulo}`);
+  } else {
+    out.push('  Dado que o usuário está autenticado no sistema');
+  }
   const ctxResumo = ctx.descricao ? precondicaoDaDescricao(ctx.descricao) : '';
-  if (ctxResumo) out.push(`    E ${ctxResumo}`);
+  if (ctxResumo && !linhaEhRotuloChamado(ctxResumo)) {
+    out.push(`    E ${ctxResumo}`);
+  }
   return out;
 }
 
@@ -450,16 +595,11 @@ function ctxTemCamposEstruturados(ctx) {
   );
 }
 
-/** Passos para Quando: passos NGF + trechos da descrição + itens do Dev. */
+/** Passos para Quando: prioriza passos NGF; descrição só se não houver passos. */
 function resolverPassosReproducao(ctx) {
-  const merged = mergePassosFontes(
-    ctx.passos,
-    ctx.descricao,
-    ctx.cenariosTesteDev
-  );
+  const merged = mergePassosFontes(ctx.passos, ctx.descricao);
   if (merged) return merged;
   if (limparTexto(ctx.passos)) return ctx.passos;
-  if (limparTexto(ctx.descricao)) return ctx.descricao;
   return '';
 }
 
@@ -515,6 +655,19 @@ function sanitizarFeatureBdd(feature) {
       continue;
     }
 
+    if (/^\s*dado\s+que\s+/i.test(trimmed) && /o\s+usuário/i.test(trimmed)) {
+      out.push(trimmed.replace(/^\s*/g, '  '));
+      continue;
+    }
+
+    if (/^\s*então\s+/i.test(trimmed) && trimmed.length < 140) {
+      const ev = entaoVerificavel(trimmed.replace(/^\s*então\s+/i, ''));
+      if (ev) {
+        out.push(`  Então ${ev}`);
+        continue;
+      }
+    }
+
     if (/^\s*mas\b/i.test(trimmed)) {
       const resto = objetivarFrase(
         trimmed.replace(/^\s*mas\s+(?:o\s+esperado\s+era\s*:?\s*)?/i, '')
@@ -543,6 +696,10 @@ function sanitizarFeatureBdd(feature) {
 
 module.exports = {
   limparTexto,
+  stripTextoAdministrativo,
+  linhaEhRotuloChamado,
+  nomeFuncionalidadeCurto,
+  entaoVerificavel,
   primeiraFrase,
   objetivarFrase,
   passoGherkin,

@@ -1,0 +1,32 @@
+# Vocabulário Mobilemed (use nos passos — não invente telas fora desta lista)
+
+## Produtos e módulos
+- **Portal / Portal Mobilemed**: navegador; login; exames; protocolo do paciente; laudos; cadastros web.
+- **Portal Vet**: variante veterinária do portal.
+- **Worklist**: fila de exames no desktop/servidor; envio ao Portal; protocolo; limpeza automática; sincronização.
+- **Portable (Desktop)**: aplicativo Windows; abertura de exames; laudário; gravação/reprodução de áudio; IA (tradução, ortografia).
+- **Laudário**: tela de laudo dentro do Portable ou fluxo associado; gravar, sair, alternar exame.
+- **DICOM Viewer Web**: visualização de estudos; espelhamento; organização de séries; IA sobre imagens.
+
+## Objetos de negócio (como o QA nomeia na prática)
+- **Exame / estudo**: item principal testado; pode ter status, modalidade, accession.
+- **Protocolo**: identificador do atendimento/paciente no Portal; deve bater entre sistemas.
+- **Paciente**: CPF, nome, ano de nascimento — dados de cadastro e vínculo.
+- **Laudo / gravação**: conteúdo produzido no laudário; mensagens de erro ao sair sem salvar.
+
+## Verbos recomendados nos passos (sempre com "o usuário")
+- Navegação: acessa, abre, entra em, seleciona, filtra, pesquisa.
+- Ação: cadastra, envia, exporta, instala, configura, aguarda, inicia, interrompe, alterna.
+- Verificação: visualiza, confere, compara, valida, anota, confirma que.
+
+## Frases de Então (verificação observável)
+- "o protocolo exibido no Portal é igual ao da Worklist"
+- "nenhuma mensagem de erro é exibida"
+- "o exame permanece visível na Worklist após [prazo]"
+- "a mensagem [texto resumido] é exibida"
+- "o laudo é salvo sem perda de gravação"
+
+## Evitar
+- Meta do Bitrix: evidências, tarefa aberta, nomes de analistas.
+- Passos vagos: "testar o fluxo", "validar comportamento", "passos para reproduzir".
+- Colar parágrafos do chamado em um único passo.

@@ -57,7 +57,7 @@ async function runOpenAI(prompt) {
         {
           role: 'system',
           content:
-            'Você gera apenas cenários BDD em Gherkin em português. Sem explicações fora do formato Funcionalidade/Cenário/Dado/Quando/Então/E.',
+            'Você é QA Mobilemed. Escreve roteiros de teste manual em Gherkin (pt-BR): passos detalhados com o usuário + ação na tela (Worklist, Portal, Portable, Laudário, DICOM Viewer) e Então verificável. Vocabulário técnico do produto; sem meta-texto do Bitrix; sem explicações fora do Gherkin.',
         },
         { role: 'user', content: prompt },
       ],

@@ -18,6 +18,7 @@
     "bdd:item": "node scripts/run-bdd-item.js",
     "bitrix:context": "node scripts/bitrix-show-context.js",
     "bitrix:diagnose-linked": "node scripts/diagnose-linked-tasks.js",
+    "bdd:prompts": "node scripts/list-bdd-prompts.js",
     "test:api": "node scripts/run-api-fixtures.js"
   },
   "dependencies": {

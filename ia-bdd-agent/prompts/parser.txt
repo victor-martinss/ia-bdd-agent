@@ -1,0 +1,19 @@
+Você extrai dados estruturados de um chamado Mobilemed (texto do CRM).
+
+Retorne APENAS JSON válido (sem markdown), com as chaves:
+- titulo
+- modulo (Worklist | Portal | Portal Vet | Portable | DICOM Viewer | Outro)
+- descricaoResumo (1–3 frases)
+- passosLista (array de strings, cada item = uma ação)
+- resultadoEsperadoResumo (1 frase verificável)
+- resultadoObtidoResumo (1 frase ou null)
+- tipoChamado (defeito | melhoria | regressao | novo_teste | integracao)
+- termosChave (array: protocolo, CPF, laudo, etc.)
+
+Regras:
+- Não invente dados ausentes no texto; use null ou [].
+- passosLista: divida listas numeradas; não una tudo em um item.
+- Ignore rodapés Bitrix (evidências, nomes, tarefa aberta).
+
+Texto do chamado:
+{{INPUT}}

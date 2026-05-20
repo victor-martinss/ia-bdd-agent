@@ -1,6 +1,5 @@
-const path = require('path');
-const fs = require('fs');
 const { runIA, isLlmEnabled } = require('../services/ia.service');
+const { buildBddPrompt } = require('../utils/bdd-prompts');
 const { extractDescription, extractTaskContext } = require('./parser');
 const {
   objetivarFrase,
@@ -17,13 +16,15 @@ const {
   cenarioQaAPartirDoDev,
   cenarioPrincipalNgf,
   entaoDoContexto,
+  nomeFuncionalidadeCurto,
+  entaoVerificavel,
 } = require('../utils/bdd-gherkin');
 
 /**
  * BDD determinístico: cenários Dev como modelo + descrição/passos/resultado da tarefa → cenários QA.
  */
 function buildStructuredBdd(title, ctx) {
-  const nomeFuncionalidade = ctx.titulo || title;
+  const nomeFuncionalidade = nomeFuncionalidadeCurto(ctx.titulo || title);
   const out = [];
 
   out.push(`Funcionalidade: ${nomeFuncionalidade}`);
@@ -50,7 +51,7 @@ function buildStructuredBdd(title, ctx) {
         cenariosTesteDev: '',
       }).trim().length > 0;
     if (temPassosNgf) {
-      out.push(`Cenário: ${nomeFuncionalidade} — validação (descrição e passos da tarefa)`);
+      out.push(`Cenário: validação pelos passos do chamado`);
       out.push(...montarDadosIniciais(ctx));
       out.push(
         ...passosParaStepsGherkin(
@@ -61,7 +62,9 @@ function buildStructuredBdd(title, ctx) {
       out.push('');
     }
   } else if (soTitulo) {
-    out.push(`Cenário: ${nomeFuncionalidade} — validação principal`);
+    const partes = String(nomeFuncionalidade).split(/\s*—\s*/);
+    const foco = partes.length > 1 ? partes.slice(1).join(' — ').slice(0, 80) : nomeFuncionalidade;
+    out.push(`Cenário: ${foco} — validação principal`);
     out.push(...montarDadosIniciais(ctx));
     out.push(...devCenariosParaPassosE(ctx.cenariosTesteDev));
     out.push(...passosAPartirDoTitulo(nomeFuncionalidade));
@@ -70,17 +73,22 @@ function buildStructuredBdd(title, ctx) {
   }
 
   if (ctx.resultadoObtido && ctx.resultadoEsperado) {
-    out.push(`Cenário: ${nomeFuncionalidade} — comportamento observado (defeito)`);
-    out.push('  Dado que o cenário principal foi executado');
-    out.push('  Quando o fluxo é concluído');
-    const obtido = objetivarFrase(primeiraFrase(ctx.resultadoObtido));
-    const esperado = objetivarFrase(primeiraFrase(ctx.resultadoEsperado));
-    if (obtido) out.push(`  Então o sistema apresenta o defeito: ${obtido}`);
-    if (esperado) out.push(`    Mas o esperado era: ${esperado}`);
+    out.push(`Cenário: ${nomeFuncionalidade} — defeito observado`);
+    out.push(...montarDadosIniciais(ctx));
+    const quando = passosParaStepsGherkin(resolverPassosReproducao(ctx));
+    if (quando.length) out.push(...quando);
+    else out.push('  Quando o usuário reproduz o fluxo do chamado');
+    const obtido = entaoVerificavel(ctx.resultadoObtido);
+    const esperado = entaoVerificavel(ctx.resultadoEsperado);
+    if (obtido) out.push(`  Então ${obtido}`);
+    if (esperado) out.push(`    Mas o esperado era ${esperado}`);
     out.push('');
   }
 
-  if (ctx.sugestaoMelhoria || ctx.motivoMelhoria) {
+  if (
+    process.env.BDD_INCLUDE_MELHORIA === '1' &&
+    (ctx.sugestaoMelhoria || ctx.motivoMelhoria)
+  ) {
     out.push(`Cenário: ${nomeFuncionalidade} — melhoria sugerida`);
     out.push('  Dado que o time analisou o chamado');
     if (ctx.motivoMelhoria) {
@@ -126,6 +134,9 @@ function montarInputLlm(title, ctx, description) {
   return partes.join('\n');
 }
 
+const PASSOS_BLOQUEADOS_LLM =
+  /passos?\s+para\s+reproduzir|cen[aá]rio\s+principal\s+foi\s+executado|fluxo\s+[eé]\s+conclu[ií]do|sistema\s+est[aá]\s+em\s+opera[çc][aã]o/i;
+
 function bddLlmOutputValido(texto) {
   if (!texto || typeof texto !== 'string') return false;
   const t = texto.trim();
@@ -133,14 +144,19 @@ function bddLlmOutputValido(texto) {
   if (/^#\s*Não foi possível gerar BDD/i.test(t)) return false;
   if (/^#\s*Erro ao gerar BDD/i.test(t)) return false;
   if (!/funcionalidade\s*:/i.test(t) && !/cenário\s*:/i.test(t)) return false;
+  if (PASSOS_BLOQUEADOS_LLM.test(t)) return false;
+  if (/tarefa\s+aberta|evid[eê]ncias?\s+enviadas/i.test(t)) return false;
   return true;
 }
 
 async function generateBddViaLlm(title, ctx, description) {
-  const promptPath = path.join(__dirname, '../../prompts/bdd.txt');
-  const tpl = fs.readFileSync(promptPath, 'utf8');
   const input = montarInputLlm(title, ctx, description);
-  const prompt = tpl.replace('{{INPUT}}', input);
+  const { prompt, resolved } = buildBddPrompt(input, { ctx, title });
+
+  if (process.env.DEBUG_BITRIX === '1') {
+    console.log(`[BDD] Prompt: ${resolved.mode} (${resolved.file}) — ${resolved.label}`);
+  }
+
   const raw = await runIA(prompt);
   return filtrarRespostaBdd(raw);
 }
@@ -154,6 +170,11 @@ async function generateBDD(title, item) {
   }
 
   const structured = () => buildStructuredBdd(title, ctx);
+  const blocosDev = parseCenariosDevBlocos(ctx.cenariosTesteDev);
+
+  if (blocosDev.length > 0 || process.env.BDD_PREFER_STRUCTURED === '1') {
+    return structured();
+  }
 
   if (!isLlmEnabled()) {
     return structured();
