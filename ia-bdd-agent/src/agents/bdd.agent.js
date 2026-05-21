@@ -2,6 +2,8 @@ const { runIA, isLlmEnabled } = require('../services/ia.service');
 const { buildBddPrompt } = require('../utils/bdd-prompts');
 const { extractTaskContext } = require('./parser');
 const { detectAmbiente, onlyTitleAndDevSources } = require('../utils/bdd-ambiente');
+const { enrichCtxWithEvidence } = require('../utils/bdd-context');
+const { formatarValidacoesParaPrompt } = require('../utils/bdd-validacoes');
 const {
   gerarCenariosCoberturaExtra,
   cabecalhoCobertura,
@@ -21,34 +23,10 @@ const {
   limparTexto,
 } = require('../utils/bdd-gherkin');
 
-/**
- * Contexto reduzido: só título + cenários Dev (+ ambiente detectado).
- * @param {ReturnType<typeof extractTaskContext>} fullCtx
- * @param {string} title
- */
+/** @deprecated use enrichCtxWithEvidence — mantido para testes/scripts */
 function prepareCtxForBdd(fullCtx, title) {
-  const titulo = fullCtx.titulo || title || '';
-  const cenariosTesteDev = fullCtx.cenariosTesteDev || '';
-  const ambiente = detectAmbiente(titulo, cenariosTesteDev);
-
-  if (!onlyTitleAndDevSources()) {
-    return { ...fullCtx, ambiente };
-  }
-
-  return {
-    titulo,
-    cenariosTesteDev,
-    ambiente,
-    descricao: '',
-    passos: '',
-    resultadoEsperado: '',
-    resultadoObtido: '',
-    sugestaoMelhoria: '',
-    motivoMelhoria: '',
-    observacoes: '',
-    observacoesHu: '',
-    observacoesTriagem: '',
-  };
+  const { prepareCtxSync } = require('../utils/bdd-context');
+  return prepareCtxSync(fullCtx, title);
 }
 
 function ctxTemDadosParaBdd(ctx) {
@@ -58,7 +36,10 @@ function ctxTemDadosParaBdd(ctx) {
   return (
     ctxTemCamposEstruturados(ctx) ||
     !!limparTexto(ctx.titulo) ||
-    !!limparTexto(ctx.cenariosTesteDev)
+    !!limparTexto(ctx.cenariosTesteDev) ||
+    !!limparTexto(ctx.descricao) ||
+    !!limparTexto(ctx.passos) ||
+    !!limparTexto(ctx.evidenceResumo)
   );
 }
 
@@ -135,19 +116,46 @@ function montarInputLlm(title, ctx) {
   const partes = [
     `Título: ${title || ctx.titulo}`,
     `Ambiente detectado (obrigatório no Dado): ${amb.label}`,
-    '',
-    'INSTRUÇÕES:',
-    '- Use SOMENTE o título e os Cenários de Teste (Dev) abaixo como fonte.',
-    '- Primeira linha de cada cenário: Dado que o usuário acessa o ambiente [nome do ambiente].',
-    '- Converta CADA cenário Dev em um cenário QA equivalente.',
-    '- Além dos cenários Dev, inclua cenários COMPLEMENTARES de cobertura (smoke, validação negativa, integração entre sistemas quando aplicável) — quantidade EXTRA além do Dev.',
-    '- Não use descrição, passos NGF nem resultado esperado do CRM (não fornecidos).',
   ];
+
+  if (onlyTitleAndDevSources()) {
+    partes.push(
+      '',
+      'INSTRUÇÕES:',
+      '- Use SOMENTE o título e os Cenários de Teste (Dev) abaixo como fonte.',
+      '- Primeira linha de cada cenário: Dado que o usuário acessa o ambiente [nome do ambiente].',
+      '- Converta CADA cenário Dev em um cenário QA equivalente.',
+      '- Além dos cenários Dev, inclua cenários COMPLEMENTARES de cobertura.',
+      '- Não use descrição, passos NGF nem resultado esperado do CRM (não fornecidos).'
+    );
+    if (ctx.cenariosTesteDev) {
+      partes.push('\nCenários de Teste (Dev):\n' + ctx.cenariosTesteDev);
+    } else {
+      partes.push('\n(Sem Cenários Dev — derive cenários mínimos a partir do título.)');
+    }
+    return partes.join('\n');
+  }
+
+  partes.push(
+    '',
+    'INSTRUÇÕES (modo assertivo):',
+    '- Analise descrição, passos, resultados e evidências ANTES de escrever os cenários.',
+    '- Cada Então deve ser critério verificável (valor, mensagem, presença/ausência na tela).',
+    '- Dado que o usuário acessa o ambiente [nome] em todo cenário.',
+    '- Converta cada cenário Dev + inclua cobertura extra com Então específicos ao chamado.'
+  );
+
+  if (ctx.descricao) partes.push('\nDescrição:\n' + ctx.descricao);
+  if (ctx.passos) partes.push('\nPassos para reproduzir:\n' + ctx.passos);
+  if (ctx.resultadoEsperado) partes.push('\nResultado esperado:\n' + ctx.resultadoEsperado);
+  if (ctx.resultadoObtido) partes.push('\nResultado obtido (defeito):\n' + ctx.resultadoObtido);
+  if (ctx.evidenceResumo) partes.push('\nAnálise de evidências Dev (imagens/vídeos):\n' + ctx.evidenceResumo);
+
+  const vals = formatarValidacoesParaPrompt(ctx);
+  if (vals) partes.push('\nValidações exatas a refletir nos Então:\n' + vals);
 
   if (ctx.cenariosTesteDev) {
     partes.push('\nCenários de Teste (Dev):\n' + ctx.cenariosTesteDev);
-  } else {
-    partes.push('\n(Sem Cenários Dev — derive cenários mínimos a partir do título.)');
   }
 
   return partes.join('\n');
@@ -185,22 +193,44 @@ async function generateBddViaLlm(title, ctx) {
 
 async function generateBDD(title, item) {
   const fullCtx = extractTaskContext(item);
-  const ctx = prepareCtxForBdd(fullCtx, title);
+  const ctx = await enrichCtxWithEvidence(fullCtx, item, title);
 
   if (!ctxTemDadosParaBdd(ctx)) {
     return '# Não foi possível gerar BDD (sem título nem Cenários de Teste Dev no CRM)\n';
   }
 
+  const fontes =
+    ctx._fontes === 'assertive'
+      ? 'assertivo (descrição + passos + resultados + evidências)'
+      : onlyTitleAndDevSources()
+        ? 'título + Dev'
+        : 'completo';
+
+  if (ctx.evidenceMeta?.arquivos > 0) {
+    console.log(
+      `[BDD] Evidências Dev: ${ctx.evidenceMeta.arquivos} arquivo(s), ${ctx.evidenceMeta.analisadas || 0} imagem(ns) com visão`
+    );
+  }
+
   if (process.env.DEBUG_BITRIX === '1') {
     console.log(
-      `[BDD] Fontes: ${onlyTitleAndDevSources() ? 'título + Dev' : 'completo'} | ambiente: ${ctx.ambiente.label}`
+      `[BDD] Fontes: ${fontes} | ambiente: ${ctx.ambiente?.label || '?'} | evidências: ${ctx.evidenceMeta?.arquivos || 0}`
     );
   }
 
   const structured = () => buildStructuredBdd(title, ctx);
   const blocosDev = parseCenariosDevBlocos(ctx.cenariosTesteDev);
 
-  if (blocosDev.length > 0 || process.env.BDD_PREFER_STRUCTURED === '1') {
+  const preferStructured =
+    process.env.BDD_PREFER_STRUCTURED === '1' ||
+    (blocosDev.length > 0 && !isLlmEnabled()) ||
+    (blocosDev.length > 0 && process.env.BDD_ASSERTIVE_LLM !== '1');
+
+  if (preferStructured && blocosDev.length > 0) {
+    return structured();
+  }
+
+  if (blocosDev.length === 0 && process.env.BDD_PREFER_STRUCTURED === '1') {
     return structured();
   }
 

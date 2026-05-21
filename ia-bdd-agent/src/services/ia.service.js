@@ -40,27 +40,41 @@ async function runOllama(prompt) {
   return text;
 }
 
-async function runOpenAI(prompt) {
+function openAIConfig() {
   const apiKey = (process.env.OPENAI_API_KEY || '').trim();
-  if (!apiKey) {
-    throw new Error('OPENAI_API_KEY não definido');
-  }
+  if (!apiKey) throw new Error('OPENAI_API_KEY não definido');
   const base = (process.env.OPENAI_API_BASE || DEFAULT_OPENAI_BASE).replace(/\/$/, '');
-  const model =
-    (process.env.BDD_AI_MODEL || process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL).trim();
+  return { apiKey, base };
+}
+
+function resolveOpenAIModel(opts = {}) {
+  if (opts.vision) {
+    return (
+      process.env.BDD_VISION_MODEL ||
+      process.env.OPENAI_VISION_MODEL ||
+      'gpt-4o'
+    ).trim();
+  }
+  return (
+    process.env.BDD_AI_MODEL || process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL
+  ).trim();
+}
+
+/** Modelo com suporte a imagens (OpenAI). */
+function isVisionCapable() {
+  if (resolveProvider() !== 'openai') return false;
+  return !!(process.env.OPENAI_API_KEY || '').trim();
+}
+
+async function runOpenAIWithMessages(messages, opts = {}) {
+  const { apiKey, base } = openAIConfig();
+  const model = resolveOpenAIModel(opts);
 
   const res = await axios.post(
     `${base}/chat/completions`,
     {
       model,
-      messages: [
-        {
-          role: 'system',
-          content:
-            'Você é QA Mobilemed. Escreve roteiros de teste manual em Gherkin (pt-BR): passos detalhados com o usuário + ação na tela (Worklist, Portal, Portable, Laudário, DICOM Viewer) e Então verificável. Vocabulário técnico do produto; sem meta-texto do Bitrix; sem explicações fora do Gherkin.',
-        },
-        { role: 'user', content: prompt },
-      ],
+      messages,
       temperature: Number.parseFloat(process.env.BDD_AI_TEMPERATURE || '0.2') || 0.2,
     },
     {
@@ -85,6 +99,20 @@ async function runOpenAI(prompt) {
   return text;
 }
 
+async function runOpenAI(prompt) {
+  return runOpenAIWithMessages(
+    [
+      {
+        role: 'system',
+        content:
+          'Você é QA Mobilemed. Escreve roteiros de teste manual em Gherkin (pt-BR): passos detalhados com o usuário + ação na tela (Worklist, Portal, Portable, Laudário, DICOM Viewer) e Então verificável. Vocabulário técnico do produto; sem meta-texto do Bitrix; sem explicações fora do Gherkin.',
+      },
+      { role: 'user', content: prompt },
+    ],
+    {}
+  );
+}
+
 function llmTimeoutMs() {
   const n = Number.parseInt(process.env.BDD_AI_TIMEOUT_MS || '120000', 10);
   return Number.isFinite(n) && n > 5000 ? n : 120000;
@@ -107,6 +135,8 @@ async function runIA(prompt) {
 
 module.exports = {
   runIA,
+  runOpenAIWithMessages,
   isLlmEnabled,
+  isVisionCapable,
   resolveProvider,
 };

@@ -1,5 +1,6 @@
 const { detectAmbiente, dadoAcessaAmbiente } = require('./bdd-ambiente');
 const { limparTexto, passosParaStepsGherkin, nomeFuncionalidadeCurto } = require('./bdd-gherkin');
+const { extrairValidacoesExatas } = require('./bdd-validacoes');
 
 function coverageExtraEnabled() {
   return process.env.BDD_COVERAGE_EXTRA !== '0';
@@ -13,10 +14,21 @@ function maxCenariosExtras() {
 function textoConsolidado(ctx, blocosDev) {
   const partes = [
     ctx.titulo,
+    ctx.descricao,
+    ctx.passos,
+    ctx.resultadoEsperado,
+    ctx.evidenceResumo,
     ctx.cenariosTesteDev,
     ...(blocosDev || []).map((b) => `${b.title || ''}\n${b.body || ''}`),
   ];
   return partes.join('\n').toLowerCase();
+}
+
+function entaoExtraAssertivo(ctx, fallback) {
+  if (process.env.BDD_ASSERTIVE_MODE === '0') return fallback;
+  const vals = extrairValidacoesExatas(ctx);
+  if (vals.length) return `  Então ${vals[0].entao}`;
+  return fallback;
 }
 
 function devJaCobre(todosBlocos, padroes) {
@@ -60,7 +72,10 @@ function gerarCenariosCoberturaExtra(ctx, blocosDev, nomeFuncionalidade) {
         `Cobertura — smoke de acesso (${amb.label})`,
         ctx,
         `acessar a tela principal de ${foco}`,
-        '  Então a tela principal é exibida sem mensagem de erro'
+        entaoExtraAssertivo(
+          ctx,
+          `  Então a tela principal de ${amb.label} é exibida sem mensagem de erro de sistema`
+        )
       )
     );
   }

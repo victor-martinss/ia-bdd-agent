@@ -1,0 +1,266 @@
+require('../../load-env');
+const axios = require('axios');
+const { flattenItem, isMeaningful } = require('../agents/parser');
+
+const BASE_URL = process.env.BITRIX_WEBHOOK;
+
+const IMG_EXT = /\.(png|jpe?g|gif|webp|bmp|svg)(\?|$)/i;
+const VIDEO_EXT = /\.(mp4|webm|mov|avi|mkv)(\?|$)/i;
+
+function restErrorMessage(data) {
+  if (!data || typeof data !== 'object') return '';
+  if (data.error) {
+    return (
+      (data.error_description && String(data.error_description)) ||
+      String(data.error)
+    );
+  }
+  return '';
+}
+
+function classificarArquivo(nome, mime) {
+  const n = String(nome || '').toLowerCase();
+  const m = String(mime || '').toLowerCase();
+  if (IMG_EXT.test(n) || m.startsWith('image/')) return 'image';
+  if (VIDEO_EXT.test(n) || m.startsWith('video/')) return 'video';
+  return 'other';
+}
+
+/** Extrai URLs de imagens/vídeos embutidas em HTML dos campos UF. */
+function extrairMidiaDeHtml(item) {
+  const flat = flattenItem(item || {});
+  const found = [];
+  const seen = new Set();
+
+  for (const val of Object.values(flat)) {
+    const html = Array.isArray(val) ? val.join(' ') : String(val || '');
+    if (!html || html.length < 10) continue;
+
+    const re = /(?:src|href)\s*=\s*["']([^"']+)["']/gi;
+    let m;
+    while ((m = re.exec(html))) {
+      const url = m[1].trim();
+      if (!url.startsWith('http') || seen.has(url)) continue;
+      const tipo = classificarArquivo(url);
+      if (tipo === 'image' || tipo === 'video') {
+        seen.add(url);
+        found.push({ url, name: url.split('/').pop() || 'anexo', type: tipo, source: 'html' });
+      }
+    }
+  }
+  return found;
+}
+
+/** Campos UF que costumam guardar links de evidência. */
+function extrairLinksDeCampos(item) {
+  const flat = flattenItem(item || {});
+  const found = [];
+  const seen = new Set();
+
+  for (const [k, v] of Object.entries(flat)) {
+    const lower = k.toLowerCase();
+    if (!/(evid|anexo|arquivo|file|imagem|video|print|screenshot|anex)/i.test(lower)) {
+      continue;
+    }
+    const text = Array.isArray(v) ? v.map(String).join('\n') : String(v || '');
+    if (!isMeaningful(text)) continue;
+
+    const urls = text.match(/https?:\/\/[^\s<>"']+/gi) || [];
+    for (const url of urls) {
+      if (seen.has(url)) continue;
+      seen.add(url);
+      const tipo = classificarArquivo(url);
+      found.push({
+        url,
+        name: url.split('/').pop() || k,
+        type: tipo === 'other' ? 'file' : tipo,
+        source: `field:${k}`,
+      });
+    }
+  }
+  return found;
+}
+
+async function listTimelineFiles(entityTypeId, itemId) {
+  if (!BASE_URL) return [];
+  const et = Number(entityTypeId);
+  const id = Number(itemId);
+  if (!Number.isFinite(et) || !Number.isFinite(id)) return [];
+
+  const entityTypes = [
+    `dynamic_${et}`,
+    `CRM_DYNAMIC_${et}`,
+    `DYNAMIC_${et}`,
+  ];
+
+  const out = [];
+  const seen = new Set();
+
+  for (const entityType of entityTypes) {
+    try {
+      const res = await axios.post(
+        `${BASE_URL}/crm.timeline.comment.list`,
+        {
+          filter: { ENTITY_ID: id, ENTITY_TYPE: entityType },
+          order: { ID: 'DESC' },
+          select: ['ID', 'COMMENT', 'FILES'],
+        },
+        { validateStatus: (s) => s >= 200 && s < 500, timeout: 20000 }
+      );
+      if (restErrorMessage(res.data)) continue;
+
+      const rows = res.data?.result || [];
+      for (const row of rows) {
+        const files = row.FILES || row.files || [];
+        const list = Array.isArray(files) ? files : Object.values(files || {});
+        for (const f of list) {
+          const url =
+            f.urlDownload || f.DOWNLOAD_URL || f.downloadUrl || f.viewUrl || f.url;
+          const name = f.name || f.NAME || f.fileName || 'timeline-anexo';
+          const idFile = f.id || f.ID;
+          const key = url || String(idFile);
+          if (!key || seen.has(key)) continue;
+          seen.add(key);
+          out.push({
+            id: idFile,
+            url,
+            name,
+            type: classificarArquivo(name, f.type),
+            source: 'timeline',
+          });
+        }
+      }
+      if (out.length) break;
+    } catch {
+      /* próximo entityType */
+    }
+  }
+  return out;
+}
+
+async function listDiskAttached(entityTypeId, itemId) {
+  if (!BASE_URL) return [];
+  const et = Number(entityTypeId);
+  const id = Number(itemId);
+  if (!Number.isFinite(et) || !Number.isFinite(id)) return [];
+
+  try {
+    const res = await axios.post(
+      `${BASE_URL}/disk.attachedObject.list`,
+      {
+        filter: {
+          MODULE_ID: 'crm',
+          ENTITY_TYPE_ID: `DYNAMIC_${et}`,
+          ENTITY_ID: id,
+        },
+      },
+      { validateStatus: (s) => s >= 200 && s < 500, timeout: 20000 }
+    );
+    if (restErrorMessage(res.data)) return [];
+
+    const rows = res.data?.result || [];
+    return rows
+      .map((r) => {
+        const name = r.NAME || r.name || 'anexo';
+        return {
+          id: r.OBJECT_ID || r.objectId || r.ID,
+          name,
+          type: classificarArquivo(name),
+          source: 'disk',
+        };
+      })
+      .filter((r) => r.id);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * @param {object} item
+ * @param {{ entityTypeId?: number, itemId?: number }} meta
+ */
+async function listEvidenceFromCrmItem(item, meta = {}) {
+  const flat = flattenItem(item || {});
+  const itemId = meta.itemId ?? flat.id ?? flat.ID;
+  const entityTypeId =
+    meta.entityTypeId ?? flat._entityTypeId ?? flat.entityTypeId;
+
+  const merged = [];
+  const seen = new Set();
+
+  const push = (e) => {
+    const key = e.url || String(e.id || e.name);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    merged.push(e);
+  };
+
+  for (const e of extrairMidiaDeHtml(item)) push(e);
+  for (const e of extrairLinksDeCampos(item)) push(e);
+
+  if (itemId && entityTypeId) {
+    for (const e of await listTimelineFiles(entityTypeId, itemId)) push(e);
+    for (const e of await listDiskAttached(entityTypeId, itemId)) push(e);
+  }
+
+  return merged;
+}
+
+/**
+ * Baixa arquivo do Bitrix (disk.file.get) como buffer — para imagens na visão.
+ */
+async function downloadDiskFile(fileId) {
+  if (!BASE_URL || !fileId) return null;
+  try {
+    const res = await axios.post(
+      `${BASE_URL}/disk.file.get`,
+      { id: fileId },
+      { validateStatus: (s) => s >= 200 && s < 500, timeout: 30000 }
+    );
+    if (restErrorMessage(res.data)) return null;
+    const url =
+      res.data?.result?.DOWNLOAD_URL ||
+      res.data?.result?.downloadUrl ||
+      res.data?.result?.DETAIL_URL;
+    if (!url) return null;
+
+    const bin = await axios.get(url, {
+      responseType: 'arraybuffer',
+      timeout: 45000,
+      maxContentLength: 8 * 1024 * 1024,
+    });
+    const contentType = bin.headers['content-type'] || 'application/octet-stream';
+    const base64 = Buffer.from(bin.data).toString('base64');
+    return { base64, contentType, url };
+  } catch {
+    return null;
+  }
+}
+
+async function downloadUrlAsBase64(url) {
+  if (!url || !/^https?:\/\//i.test(url)) return null;
+  try {
+    const bin = await axios.get(url, {
+      responseType: 'arraybuffer',
+      timeout: 45000,
+      maxContentLength: 8 * 1024 * 1024,
+    });
+    const contentType = bin.headers['content-type'] || 'application/octet-stream';
+    if (!String(contentType).startsWith('image/')) return null;
+    return {
+      base64: Buffer.from(bin.data).toString('base64'),
+      contentType,
+      url,
+    };
+  } catch {
+    return null;
+  }
+}
+
+module.exports = {
+  listEvidenceFromCrmItem,
+  downloadDiskFile,
+  downloadUrlAsBase64,
+  classificarArquivo,
+  extrairMidiaDeHtml,
+};

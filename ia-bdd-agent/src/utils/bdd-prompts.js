@@ -39,6 +39,18 @@ const PROMPT_CATALOG = {
     file: 'bdd-melhoria.txt',
     label: 'Melhoria / feature nova',
   },
+  validacao_exata: {
+    file: 'bdd-validacao-exata.txt',
+    label: 'Validação exata (Então assertivos)',
+  },
+  evidencias: {
+    file: 'bdd-evidencias.txt',
+    label: 'BDD com análise de evidências Dev',
+  },
+  coverage_assertivo: {
+    file: 'bdd-coverage-assertivo.txt',
+    label: 'Cobertura ampla + validações exatas',
+  },
 };
 
 function listPromptModes() {
@@ -84,6 +96,7 @@ function textoBusca(ctx, title) {
     ctx.cenariosTesteDev,
     ctx.resultadoEsperado,
     ctx.resultadoObtido,
+    ctx.evidenceResumo,
     ctx.sugestaoMelhoria,
     ctx.motivoMelhoria,
   ]
@@ -101,8 +114,26 @@ function textoBusca(ctx, title) {
 function detectPromptMode(ctx, title) {
   const t = textoBusca(ctx, title);
 
+  if (limpar(ctx.evidenceResumo) && process.env.BDD_ASSERTIVE_MODE !== '0') {
+    return 'evidencias';
+  }
+
+  if (
+    process.env.BDD_ASSERTIVE_MODE !== '0' &&
+    (limpar(ctx.resultadoEsperado) ||
+      (ctx.evidenceValidacoes && ctx.evidenceValidacoes.length))
+  ) {
+    return 'validacao_exata';
+  }
+
   if (ctx.resultadoObtido && limpar(ctx.resultadoObtido)) {
     return 'defeito';
+  }
+
+  if (process.env.BDD_COVERAGE_EXTRA !== '0' && process.env.BDD_ASSERTIVE_MODE !== '0') {
+    if (/\b(cobertura|smoke|regress[aã]o)\b/i.test(t) || limpar(ctx.cenariosTesteDev)) {
+      return 'coverage_assertivo';
+    }
   }
 
   if (

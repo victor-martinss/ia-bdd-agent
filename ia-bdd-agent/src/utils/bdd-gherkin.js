@@ -499,6 +499,10 @@ function cenarioQaAPartirDoDev(bloco, ctx, nomeFuncionalidade) {
 }
 
 function entaoDoContexto(ctx, textoDevFallback = '') {
+  if (process.env.BDD_ASSERTIVE_MODE !== '0') {
+    const { entaoAssertivoDoContexto } = require('./bdd-validacoes');
+    return entaoAssertivoDoContexto(ctx, textoDevFallback);
+  }
   if (!onlyTitleAndDevSources() && ctx && limparTexto(ctx.resultadoEsperado)) {
     const entao = entaoVerificavel(ctx.resultadoEsperado);
     return entao ? `  Então ${entao}` : '  Então o resultado exibido corresponde ao esperado';

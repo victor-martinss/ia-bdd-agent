@@ -124,6 +124,7 @@ function dadoAcessaAmbiente(ambiente) {
 }
 
 function onlyTitleAndDevSources() {
+  if (process.env.BDD_ASSERTIVE_MODE !== '0') return false;
   return process.env.BDD_ONLY_TITLE_AND_DEV !== '0';
 }
 
