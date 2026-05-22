@@ -14,7 +14,9 @@ ENTÃO
 
 AMBIENTE: Dado que o usuário acessa o ambiente [detectado] em todo cenário.
 
-Vídeos listados sem análise automática: inclua passo "E o usuário reproduz o fluxo conforme evidência em vídeo" e Então baseado na descrição textual.
+PASSOS: diretos, até 14 palavras; máximo 2 "E" por cenário (continuação em novo cenário se precisar).
+
+Vídeos sem análise automática: um passo curto + Então baseado na descrição (sem vários "E" seguidos).
 
 SAÍDA: somente Gherkin.
 

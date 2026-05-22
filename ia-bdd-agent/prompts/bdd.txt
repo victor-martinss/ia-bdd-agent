@@ -22,12 +22,15 @@ ESTRUTURA DE CADA CENÁRIO
 Funcionalidade: [módulo] — [assunto em até 12 palavras]
 Cenário: [ação + objeto] — [tipo: validação | cobertura | regressão]
   Dado que o usuário acessa o ambiente [Portal Web / Portable / Worklist / …]
-  Quando o usuário [primeira ação concreta]
-  E o usuário [ações seguintes, uma por linha]
-  Então [o que deve aparecer ou não aparecer na tela]
+  Quando o usuário [ação principal resumida]
+  E o usuário [até 3 complementos objetivos — agrupe cliques em um passo]
+  Então [verificação observável na tela]
 
 REGRAS
-- Máximo ~18 palavras por passo; uma ação ou uma verificação por linha.
+- Resuma o fluxo: preferir 1 Quando + 1 ou 2 "E" (máximo 3 "E"); não detalhar cada clique.
+- Agrupe passos parecidos (ex.: "localiza o exame e abre o detalhe" em um único E).
+- Cenário de continuação só se o fluxo for realmente longo (fases distintas).
+- Máximo ~14 palavras por passo; linguagem de negócio (localiza, compara, confirma, valida).
 - Quando/E: "o usuário" + verbo no presente (acessa, seleciona, compara, configura, aguarda).
 - Então: frase observável (igualdade de dados, mensagem, ausência de erro, permanência na lista).
 - Use nomes de produto do vocabulário (Worklist, Portal, Portable, Laudário, DICOM Viewer).

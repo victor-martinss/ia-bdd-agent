@@ -17,7 +17,8 @@ ENTÃO (regra central)
 - Se houver resultado obtido vs esperado: cenário de reprodução com Então = comportamento obtido; linha "Mas o esperado era ..." com o esperado resumido.
 
 PASSOS
-- Quando/E: ações concretas derivadas de passos do chamado e do que as evidências mostram.
+- Quando/E: ações concretas, curtas (até 14 palavras), uma por linha.
+- Resuma em 1 Quando + até 3 "E" objetivos; agrupe micro-passos; continuação só se fase distinta.
 - Não invente telas ou botões ausentes no chamado ou nas evidências.
 
 COBERTURA EXTRA

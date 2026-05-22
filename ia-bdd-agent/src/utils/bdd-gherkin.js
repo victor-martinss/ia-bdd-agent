@@ -10,9 +10,134 @@ const {
 } = require('./bdd-ambiente');
 
 const MAX_PASSO_CHARS =
-  Number.parseInt(process.env.BDD_MAX_STEP_CHARS || '100', 10) || 100;
+  Number.parseInt(process.env.BDD_MAX_STEP_CHARS || '90', 10) || 90;
 const MAX_PASSO_PALAVRAS =
-  Number.parseInt(process.env.BDD_MAX_STEP_WORDS || '18', 10) || 18;
+  Number.parseInt(process.env.BDD_MAX_STEP_WORDS || '14', 10) || 14;
+
+/** Máximo de linhas "E" por cenário (padrão 3: 1 Quando + até 3 E). */
+function maxEPorCenario() {
+  const n = Number.parseInt(process.env.BDD_MAX_E_STEPS || '3', 10);
+  return Number.isFinite(n) && n >= 1 ? Math.min(n, 4) : 3;
+}
+
+/** Ações brutas por cenário antes de resumir (evita "parte 2" desnecessária). */
+function maxAcoesBrutasPorCenario() {
+  const n = Number.parseInt(process.env.BDD_MAX_ACOES_POR_CENARIO || '8', 10);
+  return Number.isFinite(n) && n >= 4 ? Math.min(n, 12) : 8;
+}
+
+function passoEhPlaceholder(texto) {
+  const t = limparTexto(texto).toLowerCase();
+  return (
+    /^passo\s*\d+$/i.test(t) ||
+    /^step\s*\d+$/i.test(t) ||
+    /^ação\s*\d+$/i.test(t) ||
+    t === 'passo' ||
+    t === 'ação'
+  );
+}
+
+function dedupeAcoes(acoes) {
+  const out = [];
+  const seen = new Set();
+  for (const a of acoes) {
+    const key = a.toLowerCase().replace(/\s+/g, ' ').slice(0, 72);
+    if (!key || seen.has(key)) continue;
+    const dup = out.some(
+      (o) => o.includes(key) || key.includes(o.toLowerCase().slice(0, 40))
+    );
+    if (dup) continue;
+    seen.add(key);
+    out.push(a);
+  }
+  return out;
+}
+
+/**
+ * Resume várias micro-ações em até maxSlots passos objetivos (1 Quando + E…).
+ */
+function resumirGrupoAcoes(slice) {
+  const joined = slice.join(' ').toLowerCase();
+
+  if (/compar|sincron|consist|protocolo|entre\s+(sistemas|telas|portal|worklist)/i.test(joined)) {
+    return (
+      objetivarFrase('o usuário compara o mesmo dado entre os sistemas do fluxo', 90) ||
+      'o usuário valida consistência dos dados entre telas'
+    );
+  }
+  if (/filtro|pesquisa|busca|localiz|lista|worklist|grid/i.test(joined)) {
+    return (
+      objetivarFrase('o usuário localiza o registro na listagem do chamado', 90) ||
+      'o usuário encontra o registro na listagem'
+    );
+  }
+  if (/login|acessa|entra|abre\s+(o\s+)?(módulo|tela|portal)/i.test(joined)) {
+    return (
+      objetivarFrase('o usuário acessa a tela do fluxo descrito no chamado', 90) ||
+      'o usuário acessa a funcionalidade do chamado'
+    );
+  }
+  if (/salv|cadastr|confirm|envia|preenche|formul/i.test(joined)) {
+    return (
+      objetivarFrase('o usuário preenche e confirma os dados do fluxo', 90) ||
+      'o usuário conclui o preenchimento e confirma'
+    );
+  }
+  if (/valid|verific|confer|mensagem|erro|exibe/i.test(joined)) {
+    return (
+      objetivarFrase('o usuário verifica o resultado exibido na tela', 90) ||
+      'o usuário confere o resultado na tela'
+    );
+  }
+
+  const verbos = slice
+    .map((s) => s.replace(/^o usuário\s+/i, '').trim())
+    .filter((s) => s.length > 2 && !passoEhPlaceholder(s));
+  if (verbos.length === 1) return verbos[0].startsWith('o usuário') ? verbos[0] : `o usuário ${verbos[0]}`;
+  if (verbos.length >= 2) {
+    const resumo = `o usuário ${verbos[0]}, depois ${verbos.slice(1, 2).join(' e ')}`;
+    return objetivarFrase(resumo, 95) || limitarPalavras(resumo, MAX_PASSO_PALAVRAS);
+  }
+
+  return (
+    objetivarFrase('o usuário executa o fluxo principal descrito no chamado', 90) ||
+    'o usuário executa o fluxo principal do chamado'
+  );
+}
+
+function consolidarAcoesObjetivas(acoes, maxSlots) {
+  const limpas = dedupeAcoes(
+    acoes.filter((a) => a && !passoEhPlaceholder(a))
+  );
+
+  if (!limpas.length) {
+    return ['o usuário executa o fluxo descrito no chamado'];
+  }
+  if (limpas.length <= maxSlots) return limpas;
+
+  const out = [];
+  const porGrupo = Math.ceil(limpas.length / maxSlots);
+  for (let i = 0; i < limpas.length && out.length < maxSlots; i += porGrupo) {
+    const slice = limpas.slice(i, i + porGrupo);
+    out.push(slice.length === 1 ? slice[0] : resumirGrupoAcoes(slice));
+  }
+  return dedupeAcoes(out.slice(0, maxSlots));
+}
+
+/** Converte ações resumidas em Quando + E (ordem preservada). */
+function acoesParaLinhasGherkin(acoes) {
+  if (!acoes.length) return [];
+  const linhas = [`  Quando ${acoes[0]}`];
+  for (let i = 1; i < acoes.length; i += 1) {
+    linhas.push(`    E ${acoes[i]}`);
+  }
+  return linhas;
+}
+
+function isLinhaE(linha) {
+  const t = String(linha || '');
+  return /^\s+E\s+/i.test(t) && !/^\s*Então/i.test(t);
+}
 
 function limparTexto(s) {
   if (s == null || s === '') return '';
@@ -316,34 +441,175 @@ function extrairPassosDoTexto(texto) {
 }
 
 /**
- * Divide passos em frases e gera Quando / E.
+ * Divide passos em chunks: cada um com 1 Quando + até maxE linhas "E".
  * @param {string} passos
- * @param {{ maxLinhas?: number }} [opts]
+ * @param {{ maxE?: number }} [opts]
+ * @returns {string[][]}
  */
-function passosParaStepsGherkin(passos, opts = {}) {
-  const max =
-    Number.parseInt(process.env.BDD_MAX_PASSO_LINES || '8', 10) || 8;
-  const maxLinhas = opts.maxLinhas ?? max;
-
+function passosParaStepsGherkinComContinuacao(passos, opts = {}) {
+  const maxE = opts.maxE ?? maxEPorCenario();
+  const maxSlots = 1 + maxE;
+  const janela = opts.janela ?? maxAcoesBrutasPorCenario();
   const partes = extrairPassosDoTexto(passos);
-  if (!partes.length) {
-    return [];
-  }
-
-  const linhas = [];
-  const vistos = new Set();
+  const brutas = [];
 
   for (const p of partes) {
-    if (linhas.length >= maxLinhas) break;
-    if (linhaEhRotuloChamado(p)) continue;
+    if (linhaEhRotuloChamado(p) || passoEhPlaceholder(p)) continue;
     const corpo = objetivarFrase(p);
-    if (!corpo || vistos.has(corpo) || linhaEhRotuloChamado(corpo)) continue;
-    vistos.add(corpo);
-    if (linhas.length === 0) linhas.push(`  Quando ${corpo}`);
-    else linhas.push(`    E ${corpo}`);
+    if (!corpo || linhaEhRotuloChamado(corpo)) continue;
+    brutas.push(corpo);
   }
 
-  return linhas;
+  if (!brutas.length) return [];
+
+  const soPlaceholder =
+    partes.length > 0 && partes.every((p) => passoEhPlaceholder(p) || linhaEhRotuloChamado(p));
+  const acoesFonte = soPlaceholder
+    ? ['o usuário executa o fluxo descrito no chamado']
+    : brutas;
+
+  const chunks = [];
+  for (let i = 0; i < acoesFonte.length; i += janela) {
+    const fatia = acoesFonte.slice(i, i + janela);
+    const resumidas = consolidarAcoesObjetivas(fatia, maxSlots);
+    chunks.push(acoesParaLinhasGherkin(resumidas));
+  }
+  return chunks;
+}
+
+/**
+ * Primeiro chunk de passos (Quando + até maxE "E").
+ * @param {string} passos
+ * @param {{ maxLinhas?: number, maxE?: number }} [opts]
+ */
+function passosParaStepsGherkin(passos, opts = {}) {
+  const maxLinhas =
+    opts.maxLinhas ??
+    (Number.parseInt(process.env.BDD_MAX_PASSO_LINES || '4', 10) || 4);
+  const chunks = passosParaStepsGherkinComContinuacao(passos, opts);
+  const first = chunks[0] || [];
+  return first.slice(0, maxLinhas);
+}
+
+/**
+ * Separa corpo do cenário (sem título) em blocos Dado / ação / Então.
+ */
+function separarTiposLinhas(linhas) {
+  const dado = [];
+  const acao = [];
+  let entao = null;
+  let mas = null;
+  let viuQuando = false;
+
+  for (const ln of linhas || []) {
+    const t = String(ln || '').trimEnd();
+    if (!t) continue;
+    if (/^\s*Dado/i.test(t)) {
+      dado.push(t.replace(/^\s*/, (m) => (m.length >= 2 ? '  ' : '  ')));
+      continue;
+    }
+    if (/^\s*Então/i.test(t)) {
+      entao = t.startsWith('  ') ? t : `  ${t.trim()}`;
+      continue;
+    }
+    if (/^\s*Mas/i.test(t)) {
+      mas = t.startsWith('  ') ? t : `    ${t.trim()}`;
+      continue;
+    }
+    if (/^\s*Quando/i.test(t)) {
+      viuQuando = true;
+      acao.push(t.startsWith('  ') ? t : `  ${t.trim()}`);
+      continue;
+    }
+    if (isLinhaE(t)) {
+      const norm = t.startsWith('    ') ? t : `    E ${t.replace(/^\s*E\s+/i, '').trim()}`;
+      if (!viuQuando && !acao.length) dado.push(norm);
+      else acao.push(norm);
+      continue;
+    }
+    if (!viuQuando && !acao.length) dado.push(t);
+    else acao.push(t);
+  }
+
+  return { dado, acao, entao, mas };
+}
+
+function dividirAcaoEmChunks(acaoLinhas, maxE) {
+  const textos = [];
+  for (const ln of acaoLinhas || []) {
+    const m = String(ln).match(/^\s*(?:Quando|E)\s+(.+)$/i);
+    if (m && m[1] && !passoEhPlaceholder(m[1])) textos.push(m[1].trim());
+  }
+  if (!textos.length) return [];
+
+  const maxSlots = 1 + maxE;
+  const janela = maxAcoesBrutasPorCenario();
+  const chunks = [];
+  for (let i = 0; i < textos.length; i += janela) {
+    const resumidas = consolidarAcoesObjetivas(textos.slice(i, i + janela), maxSlots);
+    chunks.push(acoesParaLinhasGherkin(resumidas));
+  }
+  return chunks;
+}
+
+/**
+ * Divide um cenário quando há mais de maxE linhas "E".
+ * @param {string} tituloBase
+ * @param {string[]} linhasCorpo
+ * @returns {string[][]}
+ */
+function dividirCenarioCompletoPorMaxE(tituloBase, linhasCorpo) {
+  const maxE = maxEPorCenario();
+  const maxSlots = 1 + maxE;
+  const { dado, acao, entao, mas } = separarTiposLinhas(linhasCorpo);
+
+  const textos = [];
+  for (const ln of acao) {
+    const m = String(ln).match(/^\s*(?:Quando|E)\s+(.+)$/i);
+    if (m && m[1] && !passoEhPlaceholder(m[1])) textos.push(m[1].trim());
+  }
+
+  if (!textos.length) {
+    const corpo = [
+      ...dado,
+      '  Quando o usuário executa o fluxo descrito no chamado',
+    ];
+    if (entao) corpo.push(entao);
+    if (mas) corpo.push(mas);
+    return [[`Cenário: ${tituloBase}`, ...corpo]];
+  }
+
+  const janela = maxAcoesBrutasPorCenario();
+  const partesAcao = [];
+
+  if (textos.length <= janela) {
+    const resumidas = consolidarAcoesObjetivas(textos, maxSlots);
+    partesAcao.push(acoesParaLinhasGherkin(resumidas));
+  } else {
+    for (let i = 0; i < textos.length; i += janela) {
+      const resumidas = consolidarAcoesObjetivas(
+        textos.slice(i, i + janela),
+        maxSlots
+      );
+      partesAcao.push(acoesParaLinhasGherkin(resumidas));
+    }
+  }
+
+  if (partesAcao.length === 1) {
+    const corpo = [...dado, ...partesAcao[0]];
+    if (entao) corpo.push(entao);
+    if (mas) corpo.push(mas);
+    return [[`Cenário: ${tituloBase}`, ...corpo]];
+  }
+
+  return partesAcao.map((acaoPart, idx) => {
+    const suffix = idx > 0 ? ` — continuação` : '';
+    const corpo = [...dado, ...acaoPart];
+    const ultimo = idx === partesAcao.length - 1;
+    if (ultimo && entao) corpo.push(entao);
+    if (ultimo && mas) corpo.push(mas);
+    return [`Cenário: ${tituloBase}${suffix}`, ...corpo];
+  });
 }
 
 function linhaJaEhGherkin(line) {
@@ -458,29 +724,30 @@ function extrairLinhasGherkinDoBloco(lines) {
 }
 
 /**
- * Cenário QA derivado de um bloco Dev + descrição/passos/resultado da tarefa.
+ * Cenários QA a partir de um bloco Dev (divide se passar de maxE linhas "E").
+ * @returns {string[][]}
  */
-function cenarioQaAPartirDoDev(bloco, ctx, nomeFuncionalidade) {
-  const nomeCenario = bloco.title
+function cenariosQaAPartirDoDev(bloco, ctx, nomeFuncionalidade) {
+  const titulo = bloco.title
     ? bloco.title.replace(/\s+/g, ' ').slice(0, 100)
     : `${nomeFuncionalidadeCurto(nomeFuncionalidade)} — validação`;
-  const out = [`Cenário: ${nomeCenario}`];
+  const entao =
+    entaoDoContexto(ctx, bloco.body) ||
+    '  Então o resultado na tela corresponde ao esperado';
 
   const gherkinDev = extrairLinhasGherkinDoBloco(bloco.lines);
   if (gherkinDev.length >= 2) {
-    out.push(...montarDadosIniciais(ctx));
+    const corpo = [...montarDadosIniciais(ctx)];
     for (const ln of gherkinDev) {
       if (/^\s*Dado/i.test(ln)) continue;
-      out.push(ln);
+      corpo.push(ln);
     }
     if (!gherkinDev.some((l) => /^\s*Então/i.test(l))) {
-      const entao = entaoDoContexto(ctx, bloco.body);
-      if (entao) out.push(entao);
+      corpo.push(entao);
     }
-    return out;
+    return dividirCenarioCompletoPorMaxE(titulo, corpo);
   }
 
-  out.push(...montarDadosIniciais(ctx));
   const passosMerged =
     bloco.body && limparTexto(bloco.body)
       ? mergePassosFontes(
@@ -490,12 +757,27 @@ function cenarioQaAPartirDoDev(bloco, ctx, nomeFuncionalidade) {
       : onlyTitleAndDevSources()
         ? ''
         : mergePassosFontes(ctx.passos, ctx.descricao);
-  const quando = passosParaStepsGherkin(passosMerged);
-  if (quando.length) out.push(...quando);
-  else out.push('  Quando o usuário executa os passos descritos no cenário Dev');
-  const entao = entaoDoContexto(ctx, bloco.body);
-  out.push(entao || '  Então o resultado na tela corresponde ao esperado');
-  return out;
+
+  const chunks = passosParaStepsGherkinComContinuacao(passosMerged);
+  if (!chunks.length) {
+    return dividirCenarioCompletoPorMaxE(titulo, [
+      ...montarDadosIniciais(ctx),
+      '  Quando o usuário executa os passos descritos no cenário Dev',
+      entao,
+    ]);
+  }
+
+  return chunks.map((passos, idx) => {
+    const suffix = idx > 0 ? ` — continuação` : '';
+    const linhas = [`Cenário: ${titulo}${suffix}`, ...montarDadosIniciais(ctx), ...passos];
+    if (idx === chunks.length - 1) linhas.push(entao);
+    return linhas;
+  });
+}
+
+/** Um único cenário (primeiro bloco) — compatibilidade. */
+function cenarioQaAPartirDoDev(bloco, ctx, nomeFuncionalidade) {
+  return cenariosQaAPartirDoDev(bloco, ctx, nomeFuncionalidade)[0] || [];
 }
 
 function entaoDoContexto(ctx, textoDevFallback = '') {
@@ -521,15 +803,30 @@ function entaoDoContexto(ctx, textoDevFallback = '') {
 /**
  * Cenário principal QA a partir da descrição e passos da tarefa (sem bloco Dev).
  */
-function cenarioPrincipalNgf(ctx, nomeFuncionalidade) {
+function cenariosPrincipalNgf(ctx, nomeFuncionalidade) {
   const nomeCurto = nomeFuncionalidadeCurto(nomeFuncionalidade);
-  const out = [`Cenário: ${nomeCurto} — validação principal`];
-  out.push(...montarDadosIniciais(ctx));
-  const quando = passosParaStepsGherkin(resolverPassosReproducao(ctx));
-  if (quando.length) out.push(...quando);
-  else out.push('  Quando o usuário reproduz o fluxo descrito no chamado');
-  out.push(entaoDoContexto(ctx));
-  return out;
+  const titulo = `${nomeCurto} — validação principal`;
+  const entao = entaoDoContexto(ctx);
+  const chunks = passosParaStepsGherkinComContinuacao(resolverPassosReproducao(ctx));
+
+  if (!chunks.length) {
+    return dividirCenarioCompletoPorMaxE(titulo, [
+      ...montarDadosIniciais(ctx),
+      '  Quando o usuário reproduz o fluxo descrito no chamado',
+      entao,
+    ]);
+  }
+
+  return chunks.map((passos, idx) => {
+    const suffix = idx > 0 ? ` — continuação` : '';
+    const linhas = [`Cenário: ${titulo}${suffix}`, ...montarDadosIniciais(ctx), ...passos];
+    if (idx === chunks.length - 1) linhas.push(entao);
+    return linhas;
+  });
+}
+
+function cenarioPrincipalNgf(ctx, nomeFuncionalidade) {
+  return cenariosPrincipalNgf(ctx, nomeFuncionalidade)[0] || [];
 }
 
 /**
@@ -541,8 +838,10 @@ function devCenariosParaPassosE(texto) {
   const linhas = [];
   const vistos = new Set();
 
+  const maxE = maxEPorCenario();
+
   for (const item of extrairPassosDoTexto(texto)) {
-    if (linhas.length >= 6) break;
+    if (linhas.length >= maxE) break;
 
     if (linhaJaEhGherkin(item)) {
       const norm = normalizarLinhaGherkin(item);
@@ -599,15 +898,7 @@ function inferirModuloDoTitulo(titulo) {
 function montarDadosIniciais(ctx) {
   const ambiente =
     (ctx && ctx.ambiente) || detectAmbiente(ctx && ctx.titulo, ctx && ctx.cenariosTesteDev);
-  const out = [dadoAcessaAmbiente(ambiente)];
-
-  if (!onlyTitleAndDevSources() && ctx && ctx.descricao) {
-    const ctxResumo = precondicaoDaDescricao(ctx.descricao);
-    if (ctxResumo && !linhaEhRotuloChamado(ctxResumo)) {
-      out.push(`    E ${ctxResumo}`);
-    }
-  }
-  return out;
+  return [dadoAcessaAmbiente(ambiente)];
 }
 
 function ctxTemCamposEstruturados(ctx) {
@@ -659,7 +950,46 @@ function entaoAPartirDoTitulo(titulo) {
 }
 
 /**
- * Pós-processa feature inteira: encurta passos, remove colagens.
+ * Reorganiza cenários com mais de maxE linhas "E" em cenários de continuação.
+ */
+function aplicarLimiteEPorCenarioNaFeature(feature) {
+  if (!feature || typeof feature !== 'string') return '';
+
+  const linhas = feature.split(/\r?\n/);
+  const header = [];
+  const cenarios = [];
+  let atual = null;
+
+  for (const line of linhas) {
+    const trimmed = line.trimEnd();
+    if (/^cenário\s*:/i.test(trimmed)) {
+      if (atual) cenarios.push(atual);
+      atual = { titulo: trimmed.replace(/^cenário\s*:\s*/i, '').trim(), corpo: [] };
+      continue;
+    }
+    if (!atual) {
+      header.push(line);
+      continue;
+    }
+    if (trimmed) atual.corpo.push(line);
+  }
+  if (atual) cenarios.push(atual);
+
+  const saida = [...header];
+  if (header.length && header[header.length - 1] !== '') saida.push('');
+
+  for (const cen of cenarios) {
+    const partes = dividirCenarioCompletoPorMaxE(cen.titulo, cen.corpo);
+    for (const bloco of partes) {
+      saida.push(...bloco, '');
+    }
+  }
+
+  return saida.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
+}
+
+/**
+ * Pós-processa feature inteira: encurta passos, remove colagens, limita "E".
  * @param {string} feature
  */
 function sanitizarFeatureBdd(feature) {
@@ -717,7 +1047,9 @@ function sanitizarFeatureBdd(feature) {
     if (obj) out.push(`    E ${obj}`);
   }
 
-  return out.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
+  return aplicarLimiteEPorCenarioNaFeature(
+    out.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n'
+  );
 }
 
 module.exports = {
@@ -730,11 +1062,18 @@ module.exports = {
   objetivarFrase,
   passoGherkin,
   passosParaStepsGherkin,
+  passosParaStepsGherkinComContinuacao,
+  consolidarAcoesObjetivas,
+  acoesParaLinhasGherkin,
+  dividirCenarioCompletoPorMaxE,
+  maxEPorCenario,
   extrairPassosDoTexto,
   mergePassosFontes,
   parseCenariosDevBlocos,
   cenarioQaAPartirDoDev,
+  cenariosQaAPartirDoDev,
   cenarioPrincipalNgf,
+  cenariosPrincipalNgf,
   entaoDoContexto,
   devCenariosParaPassosE,
   montarDadosIniciais,

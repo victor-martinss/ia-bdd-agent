@@ -14,7 +14,8 @@ FORMATO
 Funcionalidade: [módulo] — [assunto]
 Cenário: [tipo] — [foco]
   Dado ...
-  Quando/E ...
+  Quando ...
+  E ... (até 3, resumidos; excedente → cenário "— continuação")
   Então [critério verificável único]
 
 SAÍDA: somente Gherkin.

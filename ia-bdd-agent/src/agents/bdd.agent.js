@@ -18,7 +18,9 @@ const {
   entaoAPartirDoTitulo,
   sanitizarFeatureBdd,
   parseCenariosDevBlocos,
-  cenarioQaAPartirDoDev,
+  cenariosQaAPartirDoDev,
+  passosParaStepsGherkinComContinuacao,
+  dividirCenarioCompletoPorMaxE,
   nomeFuncionalidadeCurto,
   limparTexto,
 } = require('../utils/bdd-gherkin');
@@ -61,21 +63,26 @@ function buildStructuredBdd(title, ctx) {
 
   if (blocosDev.length > 0) {
     for (const bloco of blocosDev) {
-      out.push(...cenarioQaAPartirDoDev(bloco, ctx, nomeFuncionalidade));
-      out.push('');
+      for (const linhas of cenariosQaAPartirDoDev(bloco, ctx, nomeFuncionalidade)) {
+        out.push(...linhas);
+        out.push('');
+      }
     }
   } else if (limparTexto(ctx.titulo)) {
     const partes = String(nomeFuncionalidade).split(/\s*—\s*/);
     const foco =
       partes.length > 1 ? partes.slice(1).join(' — ').slice(0, 80) : nomeFuncionalidade;
-    out.push(`Cenário: ${foco} — validação principal`);
-    out.push(...montarDadosIniciais(ctx));
+    const titulo = `${foco} — validação principal`;
+    const corpo = [...montarDadosIniciais(ctx)];
     if (limparTexto(ctx.cenariosTesteDev)) {
-      out.push(...devCenariosParaPassosE(ctx.cenariosTesteDev));
+      corpo.push(...devCenariosParaPassosE(ctx.cenariosTesteDev));
     }
-    out.push(...passosAPartirDoTitulo(nomeFuncionalidade));
-    out.push(entaoAPartirDoTitulo(nomeFuncionalidade));
-    out.push('');
+    corpo.push(...passosAPartirDoTitulo(nomeFuncionalidade));
+    corpo.push(entaoAPartirDoTitulo(nomeFuncionalidade));
+    for (const linhas of dividirCenarioCompletoPorMaxE(titulo, corpo)) {
+      out.push(...linhas);
+      out.push('');
+    }
   }
 
   if (coverageExtraEnabled()) {
@@ -89,22 +96,45 @@ function buildStructuredBdd(title, ctx) {
   if (!onlyTitleAndDevSources()) {
     const temNgf = ctxTemCamposEstruturados(ctx);
     if (temNgf && blocosDev.length === 0) {
-      const { cenarioPrincipalNgf } = require('../utils/bdd-gherkin');
-      out.push(...cenarioPrincipalNgf(ctx, nomeFuncionalidade));
-      out.push('');
+      const { cenariosPrincipalNgf } = require('../utils/bdd-gherkin');
+      for (const linhas of cenariosPrincipalNgf(ctx, nomeFuncionalidade)) {
+        out.push(...linhas);
+        out.push('');
+      }
     }
     if (ctx.resultadoObtido && ctx.resultadoEsperado) {
       const { entaoVerificavel, resolverPassosReproducao } = require('../utils/bdd-gherkin');
-      out.push(`Cenário: ${nomeFuncionalidade} — defeito observado`);
-      out.push(...montarDadosIniciais(ctx));
-      const quando = passosParaStepsGherkin(resolverPassosReproducao(ctx));
-      if (quando.length) out.push(...quando);
-      else out.push('  Quando o usuário reproduz o fluxo do chamado');
+      const titulo = `${nomeFuncionalidadeCurto(nomeFuncionalidade)} — defeito observado`;
       const obtido = entaoVerificavel(ctx.resultadoObtido);
       const esperado = entaoVerificavel(ctx.resultadoEsperado);
-      if (obtido) out.push(`  Então ${obtido}`);
-      if (esperado) out.push(`    Mas o esperado era ${esperado}`);
-      out.push('');
+      const entao = obtido ? `  Então ${obtido}` : '  Então o defeito descrito é reproduzido';
+      const mas = esperado ? `    Mas o esperado era ${esperado}` : null;
+      const chunks = passosParaStepsGherkinComContinuacao(resolverPassosReproducao(ctx));
+      const partes =
+        chunks.length > 0
+          ? chunks.map((passos, idx) => {
+              const suffix = idx > 0 ? ` — continuação` : '';
+              const linhas = [
+                `Cenário: ${titulo}${suffix}`,
+                ...montarDadosIniciais(ctx),
+                ...passos,
+              ];
+              if (idx === chunks.length - 1) {
+                linhas.push(entao);
+                if (mas) linhas.push(mas);
+              }
+              return linhas;
+            })
+          : dividirCenarioCompletoPorMaxE(titulo, [
+              ...montarDadosIniciais(ctx),
+              '  Quando o usuário reproduz o fluxo do chamado',
+              entao,
+              ...(mas ? [mas] : []),
+            ]);
+      for (const linhas of partes) {
+        out.push(...linhas);
+        out.push('');
+      }
     }
   }
 
@@ -126,6 +156,8 @@ function montarInputLlm(title, ctx) {
       '- Primeira linha de cada cenário: Dado que o usuário acessa o ambiente [nome do ambiente].',
       '- Converta CADA cenário Dev em um cenário QA equivalente.',
       '- Além dos cenários Dev, inclua cenários COMPLEMENTARES de cobertura.',
+      '- Resuma em 1 Quando + até 3 "E"; agrupe ações parecidas em um passo objetivo.',
+      '- Evite muitos "E" seguidos; prefira verbos de negócio (localiza, compara, confirma).',
       '- Não use descrição, passos NGF nem resultado esperado do CRM (não fornecidos).'
     );
     if (ctx.cenariosTesteDev) {
@@ -142,6 +174,9 @@ function montarInputLlm(title, ctx) {
     '- Analise descrição, passos, resultados e evidências ANTES de escrever os cenários.',
     '- Cada Então deve ser critério verificável (valor, mensagem, presença/ausência na tela).',
     '- Dado que o usuário acessa o ambiente [nome] em todo cenário.',
+    '- Resuma o fluxo: 1 Quando + no máximo 3 linhas "E" objetivas (agrupar micro-passos).',
+    '- Só crie cenário de continuação se o fluxo for longo demais para um resumo único.',
+    '- Passos curtos (até 14 palavras), verbo claro, sem listar cada clique.',
     '- Converta cada cenário Dev + inclua cobertura extra com Então específicos ao chamado.'
   );
 
