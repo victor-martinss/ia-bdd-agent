@@ -12,6 +12,15 @@ const RELEVANTE_TESTE =
 const RUIDO =
   /\b(tarefa\s+aberta|evid[eê]ncias?\s+enviadas?|solicita(?:do)?|anexo|print|screenshot|v[ií]deo\s+anexo|mobilemed\s+inf)\b/i;
 
+function truncarSemCortar(texto, max = 220, min = 28) {
+  const t = limparTexto(texto);
+  if (!t || t.length <= max) return t;
+  const base = t.slice(0, max);
+  const ultSep = Math.max(base.lastIndexOf(' '), base.lastIndexOf(','), base.lastIndexOf(';'));
+  const corte = ultSep > min ? base.slice(0, ultSep) : base;
+  return `${corte.trim()}…`;
+}
+
 function frasesRelevantes(texto, maxFrases = 6) {
   if (!limparTexto(texto)) return [];
   const limpo = stripTextoAdministrativo(texto);
@@ -27,11 +36,11 @@ function frasesRelevantes(texto, maxFrases = 6) {
     const key = f.toLowerCase().slice(0, 60);
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push(f.slice(0, 220));
+    out.push(truncarSemCortar(f, 220));
     if (out.length >= maxFrases) break;
   }
   if (!out.length && limpo.length >= 20) {
-    return [primeiraFrase(limpo).slice(0, 220)];
+    return [truncarSemCortar(primeiraFrase(limpo), 220)];
   }
   return out;
 }
@@ -48,16 +57,16 @@ function resumirEvidencias(texto, maxChars = 520) {
   for (const l of linhas) {
     if (RUIDO.test(l) && !RELEVANTE_TESTE.test(l)) continue;
     if (/vídeos?\s*\(\d+\)/i.test(l) && !RELEVANTE_TESTE.test(l)) {
-      uteis.push(l.slice(0, 120));
+      uteis.push(truncarSemCortar(l, 120));
       continue;
     }
     if (RELEVANTE_TESTE.test(l) || /passos visíveis|análise|mostra|exibe|mensagem|defeito/i.test(l)) {
-      uteis.push(l.slice(0, 200));
+      uteis.push(truncarSemCortar(l, 200));
     }
   }
 
   const blob = uteis.join('\n').trim() || linhas.slice(0, 4).join('\n');
-  return blob.slice(0, maxChars);
+  return truncarSemCortar(blob, maxChars);
 }
 
 function passosObjetivosDoContexto(ctx) {
@@ -82,7 +91,7 @@ function passosObjetivosDoContexto(ctx) {
     );
     if (dup) continue;
     seen.add(key);
-    out.push(p.slice(0, 140));
+    out.push(truncarSemCortar(p, 160));
     if (out.length >= 8) break;
   }
   return out;
@@ -127,19 +136,19 @@ function extrairPalavrasChave(ctx) {
 
 function montarResumoObjetivo(ctx) {
   const partes = [];
-  if (ctx.titulo) partes.push(`Foco: ${stripTextoAdministrativo(ctx.titulo).slice(0, 100)}`);
+  if (ctx.titulo) partes.push(`Foco: ${stripTextoAdministrativo(ctx.titulo)}`);
   if (ctx.palavrasChaveTeste?.length) {
     partes.push(`Áreas: ${ctx.palavrasChaveTeste.join(', ')}`);
   }
   if (ctx.resultadoObtido) {
-    partes.push(`Defeito: ${primeiraFrase(ctx.resultadoObtido).slice(0, 120)}`);
+    partes.push(`Defeito: ${truncarSemCortar(primeiraFrase(ctx.resultadoObtido), 130)}`);
   } else if (ctx.resultadoEsperado) {
-    partes.push(`Aceite: ${primeiraFrase(ctx.resultadoEsperado).slice(0, 120)}`);
+    partes.push(`Aceite: ${truncarSemCortar(primeiraFrase(ctx.resultadoEsperado), 130)}`);
   }
   if (ctx.qaHistorico?.isRetornoQa) {
     partes.push(`Histórico QA: retorno/reprovação — priorizar regressão do defeito`);
   }
-  return partes.join(' | ').slice(0, 400);
+  return truncarSemCortar(partes.join(' | '), 450, 40);
 }
 
 /**
@@ -164,10 +173,10 @@ function aplicarFiltroContexto(ctx) {
 
   const filtrado = {
     ...ctx,
-    descricaoFiltrada: descricaoFrases.join(' ').trim() || stripTextoAdministrativo(ctx.descricao || '').slice(0, 280),
+    descricaoFiltrada: descricaoFrases.join(' ').trim() || truncarSemCortar(stripTextoAdministrativo(ctx.descricao || ''), 320),
     passosFiltrados: passosFiltrados || ctx.passos || '',
     evidenceResumoFiltrado: resumirEvidencias(ctx.evidenceResumo),
-    observacoesTriagemFiltrada: triagemFrases.join(' ').trim() || (ctx.observacoesTriagem || '').slice(0, 200),
+    observacoesTriagemFiltrada: triagemFrases.join(' ').trim() || truncarSemCortar(ctx.observacoesTriagem || '', 240),
     passosEvidencia,
     passosObjetivos: [],
     palavrasChaveTeste: [],

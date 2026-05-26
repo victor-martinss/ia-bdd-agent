@@ -379,7 +379,7 @@ function montarCabecalhoPlano(ctx, qtdDev, qtdExtra, qtdLacunas, removidos) {
   if (qtdLacunas) partes.push(`${qtdLacunas} lacuna(s)`);
   linhas.push(`# Cenários QA: ${partes.join(' + ')} — ordem por risco/criticidade`);
   if (ctx.resumoObjetivo) {
-    linhas.push(`# ${ctx.resumoObjetivo.slice(0, 200)}`);
+    linhas.push(`# ${ctx.resumoObjetivo}`);
   }
   if (removidos.length) {
     linhas.push(`# Redundantes removidos: ${removidos.slice(0, 6).join('; ')}`);

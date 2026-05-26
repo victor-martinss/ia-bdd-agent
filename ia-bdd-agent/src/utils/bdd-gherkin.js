@@ -10,9 +10,35 @@ const {
 } = require('./bdd-ambiente');
 
 const MAX_PASSO_CHARS =
-  Number.parseInt(process.env.BDD_MAX_STEP_CHARS || '90', 10) || 90;
+  Number.parseInt(process.env.BDD_MAX_STEP_CHARS || '120', 10) || 120;
 const MAX_PASSO_PALAVRAS =
-  Number.parseInt(process.env.BDD_MAX_STEP_WORDS || '14', 10) || 14;
+  Number.parseInt(process.env.BDD_MAX_STEP_WORDS || '18', 10) || 18;
+
+/** Título/Funcionalidade/Cenário: só normaliza — nunca trunca. */
+function normalizarTitulo(texto) {
+  return limparMarkdownCru(stripTextoAdministrativo(String(texto || '')))
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Truncamento só para corpo de passo (Quando/E/Então), não para títulos. */
+function truncarSemCortar(texto, max = 120, min = 28) {
+  const t = limparTexto(texto);
+  if (!t || t.length <= max) return t;
+  const base = t.slice(0, max);
+  const ultSep = Math.max(base.lastIndexOf(' '), base.lastIndexOf(','), base.lastIndexOf(';'));
+  const corte = ultSep > min ? base.slice(0, ultSep) : base;
+  return `${corte.trim()}…`;
+}
+
+function limparMarkdownCru(texto) {
+  return String(texto || '')
+    .replace(/\*\*/g, '')
+    .replace(/`/g, '')
+    .replace(/\[(.*?)\]\((.*?)\)/g, '$1')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
 
 /** Máximo de linhas "E" por cenário (padrão 3: 1 Quando + até 3 E). */
 function maxEPorCenario() {
@@ -178,25 +204,31 @@ function linhaEhRotuloChamado(texto) {
   );
 }
 
-/** Nome curto da funcionalidade (módulo), sem squad/FEATURE repetido. */
+/** Nome da funcionalidade (módulo + fluxo), sem truncar. */
 function nomeFuncionalidadeCurto(titulo) {
-  let t = stripTextoAdministrativo(String(titulo || ''));
+  const t = stripTextoAdministrativo(String(titulo || ''));
   if (!t) return 'Funcionalidade do chamado';
 
   const partes = t.split(/\s*[-–—]\s*/).map((p) => p.trim()).filter(Boolean);
   if (partes.length >= 2) {
-    const mod = partes[0].replace(/^\[?\s*FEATURE\s*\]?\s*/i, '').trim();
-    const fluxo = partes.slice(1).join(' — ').slice(0, 90);
+    const mod = normalizarTitulo(partes[0].replace(/^\[?\s*FEATURE\s*\]?\s*/i, ''));
+    const fluxo = normalizarTitulo(partes.slice(1).join(' — '));
     return fluxo ? `${mod} — ${fluxo}` : mod;
   }
 
-  return t.slice(0, 120);
+  return normalizarTitulo(t);
 }
 
 /** Transforma resultado esperado/obtido em frase verificável para Então. */
 function entaoVerificavel(texto) {
-  let t = stripTextoAdministrativo(primeiraFrase(texto) || texto);
+  let t = limparMarkdownCru(stripTextoAdministrativo(texto));
   if (!t) return '';
+
+  const partes = t
+    .split(/[\n;]+/)
+    .map((p) => limparTexto(p))
+    .filter(Boolean);
+  t = partes[0] || primeiraFrase(t) || t;
 
   t = t
     .replace(/^é\s+exibid[oa]\s+(a\s+)?mensagem\s*:?\s*/i, 'exibe a mensagem ')
@@ -207,7 +239,7 @@ function entaoVerificavel(texto) {
     .replace(/^o\s+sistema\s+/i, '')
     .trim();
 
-  t = objetivarFrase(t, 110);
+  t = objetivarFrase(t, 150);
   if (!t) return '';
 
   if (/^(o|a|os|as|nenhum|nenhuma)\s/i.test(t)) return t;
@@ -258,9 +290,9 @@ function limitarPalavras(frase, max = MAX_PASSO_PALAVRAS) {
 function passoEhColagemDescricao(texto) {
   const t = limparTexto(texto);
   if (!t) return true;
-  if (t.length > MAX_PASSO_CHARS * 1.5) return true;
+  if (t.length > MAX_PASSO_CHARS * 2.1) return true;
   const palavras = t.split(/\s+/).length;
-  if (palavras > MAX_PASSO_PALAVRAS + 4) return true;
+  if (palavras > MAX_PASSO_PALAVRAS + 10) return true;
   if (/\d+\s*[-–—]\s*.+\d+\s*[-–—]/.test(t)) return true;
   if (/(mesmo\s+com|apesar\s+de).{80,}/i.test(t)) return true;
   if (/^[\d\s.\-–—]+$/.test(t)) return true;
@@ -334,13 +366,13 @@ function objetivarFrase(frase, maxLen = MAX_PASSO_CHARS) {
   f = limitarPalavras(f);
 
   if (f.length > maxLen) {
-    const cortada = f.slice(0, maxLen);
-    const ultimoEspaco = cortada.lastIndexOf(' ');
-    f = (ultimoEspaco > 24 ? cortada.slice(0, ultimoEspaco) : cortada).trim();
+    f = truncarSemCortar(f, maxLen, 24);
   }
 
   f = f.replace(/[.!?]+$/g, '').trim();
   if (!f || passoEhColagemDescricao(f)) return '';
+  const primeira = f.split(/\s+/)[0] || '';
+  if (/^[A-ZÁÉÍÓÚÂÊÔÃÕÇ]{2,}$/.test(primeira)) return f;
   return f.charAt(0).toLowerCase() + f.slice(1);
 }
 
@@ -709,34 +741,33 @@ function parseCenariosDevBlocos(texto) {
 }
 
 function limparLabelMarkdown(label) {
-  return String(label || '')
+  return limparMarkdownCru(String(label || ''))
     .replace(/\*\*/g, '')
     .replace(/`/g, '')
     .replace(/^[\s:'"]+|[\s:'"]+$/g, '')
-    .trim()
-    .slice(0, 70);
+    .trim();
 }
 
 /** Label + descrição de bullet markdown Dev (`**Rota** POST ...: cond → 403`). */
 function extrairLabelDescricaoBullet(bullet) {
-  const b = String(bullet || '').trim();
+  const b = limparMarkdownCru(String(bullet || ''));
 
   const mTickInBold = b.match(/^\*\*`([^`]+)`:\*+\s*(.*)$/s);
   if (mTickInBold) {
     return {
       label: limparLabelMarkdown(mTickInBold[1]),
-      descricao: mTickInBold[2].trim(),
+      descricao: limparMarkdownCru(mTickInBold[2]),
     };
   }
 
   const mBold = b.match(/^\*\*([^*:]+):\*+\s*(.*)$/s);
   if (mBold) {
     let label = limparLabelMarkdown(mBold[1]);
-    let descricao = mBold[2].trim();
+    let descricao = limparMarkdownCru(mBold[2]);
     if (descricao.startsWith('`')) {
       const route = descricao.match(/^`([^`]+)`\s*:?\s*(.*)$/s);
       if (route) {
-        label = `${label} ${route[1]}`.trim().slice(0, 70);
+        label = normalizarTitulo(`${label} ${route[1]}`);
         descricao = route[2].trim();
       }
     }
@@ -745,18 +776,18 @@ function extrairLabelDescricaoBullet(bullet) {
 
   const mTick = b.match(/^`([^`]+)`\s*:+\s*(.*)$/s);
   if (mTick) {
-    return { label: limparLabelMarkdown(mTick[1]), descricao: mTick[2].trim() };
+    return { label: limparLabelMarkdown(mTick[1]), descricao: limparMarkdownCru(mTick[2]) };
   }
 
   const colon = b.search(/:(?![^`]*`)/);
   if (colon > 2 && colon < 90) {
     return {
       label: limparLabelMarkdown(b.slice(0, colon)),
-      descricao: b.slice(colon + 1).trim(),
+      descricao: limparMarkdownCru(b.slice(colon + 1)),
     };
   }
 
-  return { label: limparLabelMarkdown(b.slice(0, 55)), descricao: b };
+  return { label: limparLabelMarkdown(b), descricao: limparMarkdownCru(b) };
 }
 
 /** Pares condição → resultado dentro do bullet (separados por `;`). */
@@ -812,12 +843,13 @@ function quandoDeAcaoMarkdown(acao, label, bullet) {
 }
 
 function montarCorpoBulletMarkdown(label, descricao, bullet) {
+  const descCurta = limparMarkdownCru(String(descricao || '').split(';')[0] || descricao);
   const pares = extrairParesSeta(descricao);
   if (pares.length) {
     return pares.map(({ acao, resultado }) => {
       const quando = quandoDeAcaoMarkdown(acao, label, bullet);
       const entao = `  Então ${entaoDeResultadoMarkdown(resultado)}`;
-      return { quando, entao, sufixo: acao.slice(0, 40) };
+      return { quando, entao, sufixo: limparMarkdownCru(acao) };
     });
   }
 
@@ -836,7 +868,7 @@ function montarCorpoBulletMarkdown(label, descricao, bullet) {
     } else {
       quando = `  Quando o usuário valida ${label}`;
     }
-    const ev = entaoVerificavel(descricao) || objetivarFrase(descricao, 110);
+    const ev = entaoVerificavel(descCurta) || objetivarFrase(descCurta, 120);
     return [{ quando, entao: `  Então ${ev || descricao}`, sufixo: '' }];
   }
 
@@ -898,8 +930,8 @@ function parseCenariosDevMarkdown(bruto) {
       for (const { quando, entao, sufixo } of corpos) {
         if (!entao) continue;
         const tituloCurto = sufixo
-          ? `${tituloBase} — ${sufixo}`.slice(0, 100)
-          : tituloBase;
+          ? normalizarTitulo(`${tituloBase} — ${sufixo}`)
+          : normalizarTitulo(tituloBase);
         const qLine = String(quando || '').replace(/^\s+/, '').trim();
         const eLine = String(entao || '').replace(/^\s+/, '').trim();
         const corpo = `${qLine}\n${eLine}`;
@@ -976,7 +1008,7 @@ function extrairLinhasGherkinDoBloco(lines) {
  */
 function cenariosQaAPartirDoDev(bloco, ctx, nomeFuncionalidade) {
   const titulo = bloco.title
-    ? bloco.title.replace(/\s+/g, ' ').slice(0, 100)
+    ? normalizarTitulo(bloco.title)
     : `${nomeFuncionalidadeCurto(nomeFuncionalidade)} — validação`;
 
   const passosCorpo = extrairQuandoEntaoDoCorpo(bloco.body);
@@ -1324,6 +1356,7 @@ function sanitizarFeatureBdd(feature) {
 
 module.exports = {
   limparTexto,
+  normalizarTitulo,
   stripTextoAdministrativo,
   linhaEhRotuloChamado,
   nomeFuncionalidadeCurto,

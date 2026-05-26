@@ -122,7 +122,7 @@ function buildStructuredBdd(title, ctx) {
   } else if (limparTexto(ctx.titulo)) {
     const partes = String(nomeFuncionalidade).split(/\s*—\s*/);
     const foco =
-      partes.length > 1 ? partes.slice(1).join(' — ').slice(0, 80) : nomeFuncionalidade;
+      partes.length > 1 ? partes.slice(1).join(' — ') : nomeFuncionalidade;
     const titulo = `${foco} — validação principal`;
     const corpo = [...montarDadosIniciais(ctx)];
     if (limparTexto(ctx.cenariosTesteDev)) {
