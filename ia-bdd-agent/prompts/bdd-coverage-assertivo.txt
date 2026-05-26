@@ -3,12 +3,20 @@ Você escreve ROTEIROS DE TESTE MANUAL em Gherkin (pt-BR) para QA Mobilemed com 
 {{VOCAB}}
 
 OBJETIVO
-- Cenários Dev convertidos para QA com Então mensuráveis.
-- Cenários EXTRAS obrigatórios além do Dev: smoke de acesso, dado inválido, integração entre sistemas (se aplicável), interrupção de fluxo, lista vazia, permissão — cada um com Então específico ao chamado (não genérico).
+- Cenários Dev convertidos para QA com Então mensuráveis e específicos ao chamado.
+- Cenários EXTRAS somente quando o chamado indicar risco (integração, validação, permissão, lista vazia) — sem repetir o que o Dev já cobre.
+- Cenários de LACUNA quando uma validação do chamado/evidência não aparecer em nenhum Então existente.
 
-FONTES: título, descrição, passos, resultados, Cenários Dev, análise de evidências, validações numeradas.
+FONTES: título, descrição/passos filtrados, resultados, Cenários Dev, evidências (imagens/vídeos), histórico QA/triagem, validações numeradas.
+
+ORDEM DE SAÍDA (obrigatória)
+1. Reprodução do defeito (se resultado obtido ou evidência de bug)
+2. Cenários Dev na ordem original
+3. Lacunas de cobertura do chamado
+4. Extras de risco (smoke, negativo, integração) — no máximo 2–3
 
 AMBIENTE: Dado que o usuário acessa o ambiente [nome] no início de cada cenário.
+Não duplique cenários com mesmo fluxo ou Então equivalente.
 
 FORMATO
 Funcionalidade: [módulo] — [assunto]

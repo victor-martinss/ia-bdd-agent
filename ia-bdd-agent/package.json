@@ -19,7 +19,8 @@
     "bitrix:context": "node scripts/bitrix-show-context.js",
     "bitrix:diagnose-linked": "node scripts/diagnose-linked-tasks.js",
     "bdd:prompts": "node scripts/list-bdd-prompts.js",
-    "test:api": "node scripts/run-api-fixtures.js"
+    "test:api": "node scripts/run-api-fixtures.js",
+    "bdd:calibrate": "node scripts/analyze-bdd-calibration.js"
   },
   "dependencies": {
     "axios": "^1.15.2",

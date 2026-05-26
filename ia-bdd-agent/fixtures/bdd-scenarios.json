@@ -11,7 +11,8 @@
         "ufCrm94NgfDescricaoDoOcorrido": "Mesmo com o CPF enviado corretamente pela Worklist, o portal gera um novo protocolo em vez de vincular ao registro existente.",
         "ufCrm94NgfPassosParaReproduzir": "Cadastrar paciente na Worklist com CPF e ano. Enviar exame para o portal. Verificar geração de novo protocolo.",
         "ufCrm94NgfResultadoEsperado": "O sistema deve associar corretamente o paciente existente.",
-        "ufCrm94NgfResultadoObtido": "Novo protocolo criado sem associação."
+        "ufCrm94NgfResultadoObtido": "Novo protocolo criado sem associação.",
+        "ufCrm94CenariosDeTesteDev": "Cenário: Associar paciente existente no portal\nDado paciente cadastrado na Worklist com CPF e ano\nQuando envio o exame para o portal\nEntão o protocolo existente é reutilizado\n\nCenário: Comparar protocolo worklist x portal\nQuando abro o mesmo paciente nos dois sistemas\nEntão o número de protocolo é o mesmo"
       }
     },
     {
@@ -81,6 +82,51 @@
         "ufCrm94NgfResultadoEsperado": "PDF contém linhas da grade.",
         "ufCrm94NgfResultadoObtido": "PDF com uma página em branco.",
         "ufCrm94NgfObservacoesDaTriagemDeQualidade": "Reproduzido em homologação com usuário teste_qa; cache do navegador limpo."
+      }
+    },
+    {
+      "id": "bitrix-worklist-envio",
+      "name": "Padrão QA Bitrix — falha envio worklist (ref. card #246)",
+      "cardTitle": "Worklist - Falha no envio de exames via Worklist",
+      "item": {
+        "id": 999007,
+        "title": "Worklist - Falha no envio de exames via Worklist na versão 2.8.3",
+        "ufCrm94NgfTitulo": "Falha no envio de exames via Worklist na versão 2.8.3",
+        "ufCrm94NgfDescricaoDoOcorrido": "Exames cadastrados manualmente na Worklist não são recebidos pelo equipamento na versão 2.8.3.",
+        "ufCrm94NgfPassosParaReproduzir": "Conectar worklist ao equipamento. Cadastrar exame manualmente. Aguardar envio.",
+        "ufCrm94NgfResultadoEsperado": "Exames devem ser enviados e recebidos corretamente pelo equipamento.",
+        "ufCrm94NgfResultadoObtido": "Exame permanece pendente sem confirmação de recebimento.",
+        "ufCrm94CenariosDeTesteDev": "Cenário: Envio manual com conexão ativa\nDado worklist conectada ao equipamento\nQuando cadastro exame manualmente\nEntão equipamento recebe o exame"
+      }
+    },
+    {
+      "id": "bitrix-worklist-sincronizacao",
+      "name": "Padrão QA Bitrix — 4 cenários Dev worklist×portal (ref. #1196)",
+      "cardTitle": "Worklist - Sincronização de protocolo com Portal",
+      "item": {
+        "id": 999009,
+        "title": "Sustentação - Worklist - Sincronização de protocolo entre Worklist e Portal",
+        "ufCrm94NgfTitulo": "Sincronização de protocolo entre Worklist e Portal",
+        "ufCrm94NgfDescricaoDoOcorrido": "Protocolo do exame na Worklist difere do exibido no Portal após envio.",
+        "ufCrm94NgfPassosParaReproduzir": "Anotar protocolo na Worklist. Enviar exame ao Portal. Comparar protocolo no Portal.",
+        "ufCrm94NgfResultadoEsperado": "Protocolo igual nos dois sistemas. Sem erro ao enviar. Exame visível na Worklist após 5 min.",
+        "ufCrm94NgfResultadoObtido": "Protocolo diferente entre Worklist e Portal.",
+        "ufCrm94CenariosDeTesteDev": "Cenário: Verificar sincronização de protocolo\nQuando comparo protocolo worklist e portal\nEntão o protocolo exibido no Portal é igual ao da Worklist\n\nCenário: Ausência de erro ao enviar exame\nQuando envio exame da Worklist para o Portal\nEntão nenhuma mensagem de erro é exibida\n\nCenário: Exame visível após envio\nQuando aguardo 5 minutos após envio\nEntão o exame permanece visível na Worklist\n\nCenário: Consistência de dados do paciente\nQuando comparo CPF e nome entre sistemas\nEntão os dados do paciente são iguais"
+      }
+    },
+    {
+      "id": "bitrix-portable-laudario",
+      "name": "Padrão QA Bitrix — erro ao sair do laudário (ref. card #234)",
+      "cardTitle": "Portable - Mensagem de erro ao sair do laudário",
+      "item": {
+        "id": 999008,
+        "title": "Portable - Interno: Mensagem de erro ao sair do laudário",
+        "ufCrm94NgfTitulo": "Mensagem de erro ao sair do laudário",
+        "ufCrm94NgfDescricaoDoOcorrido": "Ao sair do laudário após gravação, aparece erro PlayStop na UI.",
+        "ufCrm94NgfPassosParaReproduzir": "Abrir laudário. Iniciar gravação. Sair da tela do laudário.",
+        "ufCrm94NgfResultadoEsperado": "Nenhuma mensagem de erro ao sair do laudário.",
+        "ufCrm94NgfResultadoObtido": "Mensagem PlayStop: Falha ao reproduzir/pausar.",
+        "ufCrm94CenariosDeTesteDev": "Cenário: Sair do laudário sem gravação\nQuando abro laudário e saio sem gravar\nEntão não exibe erro\n\nCenário: Sair após gravação\nQuando gravo áudio e saio do laudário\nEntão não exibe mensagem de erro"
       }
     }
   ]

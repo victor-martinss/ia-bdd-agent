@@ -91,12 +91,14 @@ function textoBusca(ctx, title) {
   return [
     title,
     ctx.titulo,
-    ctx.descricao,
-    ctx.passos,
+    ctx.descricaoFiltrada || ctx.descricao,
+    ctx.passosFiltrados || ctx.passos,
     ctx.cenariosTesteDev,
     ctx.resultadoEsperado,
     ctx.resultadoObtido,
-    ctx.evidenceResumo,
+    ctx.evidenceResumoFiltrado || ctx.evidenceResumo,
+    ctx.observacoesTriagemFiltrada || ctx.observacoesTriagem,
+    ctx.qaHistorico?.reason,
     ctx.sugestaoMelhoria,
     ctx.motivoMelhoria,
   ]
@@ -128,6 +130,10 @@ function detectPromptMode(ctx, title) {
 
   if (ctx.resultadoObtido && limpar(ctx.resultadoObtido)) {
     return 'defeito';
+  }
+
+  if (ctx.qaHistorico?.isRetornoQa || /\b(reprov|retorn|regress)\b/i.test(t)) {
+    return 'regressao';
   }
 
   if (process.env.BDD_COVERAGE_EXTRA !== '0' && process.env.BDD_ASSERTIVE_MODE !== '0') {

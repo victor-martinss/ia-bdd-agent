@@ -68,6 +68,8 @@ async function analyzeDevEvidence(item, ctx, meta = {}) {
   }
 
   let defeitoVisivel = null;
+  let passosObservados = [];
+  let elementosTela = [];
 
   if (imagePayloads.length && isVisionCapable()) {
     try {
@@ -75,7 +77,12 @@ async function analyzeDevEvidence(item, ctx, meta = {}) {
       if (vision.resumo) partesResumo.push(vision.resumo);
       if (vision.validacoes?.length) validacoes.push(...vision.validacoes);
       if (vision.passosObservados?.length) {
-        partesResumo.push(`Passos visíveis nas evidências: ${vision.passosObservados.join('; ')}`);
+        passosObservados = vision.passosObservados;
+        partesResumo.push(`Passos visíveis: ${passosObservados.slice(0, 5).join('; ')}`);
+      }
+      if (vision.elementosTela?.length) {
+        elementosTela = vision.elementosTela;
+        partesResumo.push(`Elementos na tela: ${elementosTela.slice(0, 8).join(', ')}`);
       }
       if (vision.defeitoVisivel) defeitoVisivel = vision.defeitoVisivel;
     } catch (e) {
@@ -95,6 +102,8 @@ async function analyzeDevEvidence(item, ctx, meta = {}) {
     videoCount: videos.length,
     analyzedImages: analyzed,
     defeitoVisivel,
+    passosObservados,
+    elementosTela,
   };
 }
 

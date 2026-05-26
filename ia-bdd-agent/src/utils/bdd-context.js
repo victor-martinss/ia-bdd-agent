@@ -1,6 +1,7 @@
 const { detectAmbiente, onlyTitleAndDevSources } = require('./bdd-ambiente');
 const { analyzeDevEvidence, evidenceAnalysisEnabled } = require('../services/evidence-analyzer.service');
 const { flattenItem } = require('../agents/parser');
+const { aplicarFiltroContexto } = require('./bdd-context-filter');
 
 /** Modo assertivo: descrição, passos, resultados + evidências (padrão ligado). */
 function assertiveModeEnabled() {
@@ -87,6 +88,13 @@ async function enrichCtxWithEvidence(ctx, rawItem, title) {
     }
   }
 
+  if (evidence.passosObservados?.length) {
+    base.passosEvidencia = evidence.passosObservados;
+  }
+  if (evidence.elementosTela?.length) {
+    base.elementosTelaEvidencia = evidence.elementosTela;
+  }
+
   return base;
 }
 
@@ -94,4 +102,5 @@ module.exports = {
   assertiveModeEnabled,
   prepareCtxSync,
   enrichCtxWithEvidence,
+  aplicarFiltroContexto,
 };

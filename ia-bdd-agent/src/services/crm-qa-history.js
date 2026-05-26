@@ -317,6 +317,29 @@ async function itemTemHistoricoQa(detail) {
   return { has: false, reason: '' };
 }
 
+/**
+ * Resumo para ordenação de cenários BDD (risco/regressão).
+ * @param {Record<string, unknown> | null | undefined} detail
+ */
+async function resumoHistoricoParaBdd(detail) {
+  const hist = await itemTemHistoricoQa(detail);
+  const flat = flattenItem(detail || {});
+  const triagem = pickCrmUfText(flat, [
+    'NgfObservacoesDaTriagemDeQualidade',
+    'ObservacoesDaTriagem',
+  ]);
+  const triagemTxt = String(triagem || '').toLowerCase();
+  const regressaoExplicita =
+    /\b(reprov|retorn|regress|revalid|homolog|j[aá]\s+test)/i.test(triagemTxt);
+
+  return {
+    isRetornoQa: hist.has || regressaoExplicita,
+    reason: hist.reason || (regressaoExplicita ? 'observações de triagem indicam reteste' : ''),
+    prioridadeRegressao: hist.has || regressaoExplicita,
+    observacoesTriagem: isMeaningful(triagem) ? String(triagem).trim() : '',
+  };
+}
+
 function clearQaHistoryCache() {
   stageHistoryCache.clear();
 }
@@ -325,6 +348,7 @@ module.exports = {
   qaHistoryCheckEnabled,
   itemTemHistoricoQa,
   qaHistorySignalsFromFields,
+  resumoHistoricoParaBdd,
   fetchItemStageHistory,
   clearQaHistoryCache,
 };

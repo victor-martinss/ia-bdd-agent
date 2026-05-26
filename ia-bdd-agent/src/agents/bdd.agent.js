@@ -2,8 +2,10 @@ const { runIA, isLlmEnabled } = require('../services/ia.service');
 const { buildBddPrompt } = require('../utils/bdd-prompts');
 const { extractTaskContext } = require('./parser');
 const { detectAmbiente, onlyTitleAndDevSources } = require('../utils/bdd-ambiente');
-const { enrichCtxWithEvidence } = require('../utils/bdd-context');
+const { enrichCtxWithEvidence, aplicarFiltroContexto } = require('../utils/bdd-context');
 const { formatarValidacoesParaPrompt } = require('../utils/bdd-validacoes');
+const { planificarFeatureBdd } = require('../utils/bdd-scenario-planner');
+const { resumoHistoricoParaBdd } = require('../services/crm-qa-history');
 const {
   gerarCenariosCoberturaExtra,
   cabecalhoCobertura,
@@ -138,7 +140,15 @@ function buildStructuredBdd(title, ctx) {
     }
   }
 
-  return sanitizarFeatureBdd(out.join('\n'));
+  const feature = sanitizarFeatureBdd(out.join('\n'));
+  return finalizarFeatureBdd(feature, ctx, {
+    qtdDev: blocosDev.length,
+  });
+}
+
+function finalizarFeatureBdd(feature, ctx, meta = {}) {
+  if (!feature) return feature;
+  return planificarFeatureBdd(feature, ctx, meta);
 }
 
 function montarInputLlm(title, ctx) {
@@ -171,20 +181,42 @@ function montarInputLlm(title, ctx) {
   partes.push(
     '',
     'INSTRUÇÕES (modo assertivo):',
-    '- Analise descrição, passos, resultados e evidências ANTES de escrever os cenários.',
-    '- Cada Então deve ser critério verificável (valor, mensagem, presença/ausência na tela).',
+    '- Analise descrição, passos, resultados, evidências e histórico QA ANTES de escrever.',
+    '- Cada Então = critério verificável (valor, mensagem, elemento visível na tela).',
     '- Dado que o usuário acessa o ambiente [nome] em todo cenário.',
-    '- Resuma o fluxo: 1 Quando + no máximo 3 linhas "E" objetivas (agrupar micro-passos).',
-    '- Só crie cenário de continuação se o fluxo for longo demais para um resumo único.',
-    '- Passos curtos (até 14 palavras), verbo claro, sem listar cada clique.',
-    '- Converta cada cenário Dev + inclua cobertura extra com Então específicos ao chamado.'
+    '- Resuma: 1 Quando + até 3 "E" objetivos; sem micro-cliques nem texto administrativo.',
+    '- NÃO repita cenários com mesmo fluxo/Então; una redundâncias.',
+    '- ORDEM de saída: (1) reprodução do defeito se houver, (2) cenários Dev na ordem, (3) lacunas do chamado, (4) cobertura extra por risco.',
+    '- Lacunas: inclua cenário só se validação do chamado/evidência não estiver coberta.',
+    '- Converta cada cenário Dev; extras só quando agregarem risco real ao chamado.'
   );
 
-  if (ctx.descricao) partes.push('\nDescrição:\n' + ctx.descricao);
-  if (ctx.passos) partes.push('\nPassos para reproduzir:\n' + ctx.passos);
+  if (ctx.resumoObjetivo) partes.push('\nResumo objetivo do teste:\n' + ctx.resumoObjetivo);
+  if (ctx.qaHistorico?.isRetornoQa) {
+    partes.push(
+      '\nHistórico QA (priorizar regressão):',
+      ctx.qaHistorico.reason || 'retorno após ciclo de testes'
+    );
+    if (ctx.observacoesTriagemFiltrada) {
+      partes.push('Observações triagem: ' + ctx.observacoesTriagemFiltrada);
+    }
+  }
+  if (ctx.descricaoFiltrada || ctx.descricao) {
+    partes.push('\nDescrição (filtrada):\n' + (ctx.descricaoFiltrada || ctx.descricao));
+  }
+  if (ctx.passosFiltrados || ctx.passos) {
+    partes.push('\nPassos para reproduzir:\n' + (ctx.passosFiltrados || ctx.passos));
+  }
+  if (ctx.passosObjetivos?.length) {
+    partes.push('\nPassos objetivos extraídos:\n' + ctx.passosObjetivos.map((p, i) => `${i + 1}. ${p}`).join('\n'));
+  }
   if (ctx.resultadoEsperado) partes.push('\nResultado esperado:\n' + ctx.resultadoEsperado);
   if (ctx.resultadoObtido) partes.push('\nResultado obtido (defeito):\n' + ctx.resultadoObtido);
-  if (ctx.evidenceResumo) partes.push('\nAnálise de evidências Dev (imagens/vídeos):\n' + ctx.evidenceResumo);
+  const ev = ctx.evidenceResumoFiltrado || ctx.evidenceResumo;
+  if (ev) partes.push('\nAnálise de evidências Dev (imagens/vídeos):\n' + ev);
+  if (ctx.elementosTelaEvidencia?.length) {
+    partes.push('\nElementos visíveis nas evidências:\n' + ctx.elementosTelaEvidencia.join(', '));
+  }
 
   const vals = formatarValidacoesParaPrompt(ctx);
   if (vals) partes.push('\nValidações exatas a refletir nos Então:\n' + vals);
@@ -212,7 +244,7 @@ function bddLlmOutputValido(texto) {
   return true;
 }
 
-async function generateBddViaLlm(title, ctx) {
+async function generateBddViaLlm(title, ctx, meta = {}) {
   const input = montarInputLlm(title, ctx);
   const { prompt, resolved } = buildBddPrompt(input, { ctx, title });
 
@@ -223,12 +255,32 @@ async function generateBddViaLlm(title, ctx) {
   }
 
   const raw = await runIA(prompt);
-  return filtrarRespostaBdd(raw);
+  return filtrarRespostaBdd(raw, ctx, meta);
+}
+
+async function prepararCtxBdd(title, item) {
+  const fullCtx = extractTaskContext(item);
+  let ctx = await enrichCtxWithEvidence(fullCtx, item, title);
+
+  try {
+    const qaHistorico = await resumoHistoricoParaBdd(item);
+    ctx.qaHistorico = qaHistorico;
+    if (qaHistorico.observacoesTriagem && !ctx.observacoesTriagem) {
+      ctx.observacoesTriagem = qaHistorico.observacoesTriagem;
+    }
+  } catch (e) {
+    if (process.env.DEBUG_BITRIX === '1') {
+      console.warn('[BDD] histórico QA:', e.message || e);
+    }
+    ctx.qaHistorico = { isRetornoQa: false, reason: '' };
+  }
+
+  ctx = aplicarFiltroContexto(ctx);
+  return ctx;
 }
 
 async function generateBDD(title, item) {
-  const fullCtx = extractTaskContext(item);
-  const ctx = await enrichCtxWithEvidence(fullCtx, item, title);
+  const ctx = await prepararCtxBdd(title, item);
 
   if (!ctxTemDadosParaBdd(ctx)) {
     return '# Não foi possível gerar BDD (sem título nem Cenários de Teste Dev no CRM)\n';
@@ -253,8 +305,10 @@ async function generateBDD(title, item) {
     );
   }
 
-  const structured = () => buildStructuredBdd(title, ctx);
   const blocosDev = parseCenariosDevBlocos(ctx.cenariosTesteDev);
+  ctx._ordemDev = blocosDev.map((b) => b.title || '').filter(Boolean);
+
+  const structured = () => buildStructuredBdd(title, ctx);
 
   const preferStructured =
     process.env.BDD_PREFER_STRUCTURED === '1' ||
@@ -269,12 +323,21 @@ async function generateBDD(title, item) {
     return structured();
   }
 
+  const cardSoTitulo =
+    blocosDev.length === 0 &&
+    !ctxTemCamposEstruturados(ctx) &&
+    limparTexto(ctx.titulo || title);
+
+  if (cardSoTitulo) {
+    return structured();
+  }
+
   if (!isLlmEnabled()) {
     return structured();
   }
 
   try {
-    const fromLlm = await generateBddViaLlm(title, ctx);
+    const fromLlm = await generateBddViaLlm(title, ctx, { qtdDev: blocosDev.length });
     if (bddLlmOutputValido(fromLlm)) {
       return fromLlm;
     }
@@ -288,7 +351,7 @@ async function generateBDD(title, item) {
   return structured();
 }
 
-function filtrarRespostaBdd(texto) {
+function filtrarRespostaBdd(texto, ctx = {}, meta = {}) {
   if (!texto || typeof texto !== 'string') return '';
   let t = texto.trim();
 
@@ -304,7 +367,9 @@ function filtrarRespostaBdd(texto) {
     idxHash >= 0 ? idxHash : idxFunc >= 0 ? idxFunc : idxCen >= 0 ? idxCen : 0;
   const cortado = t.slice(start).trim() || t;
 
-  const semMeta = cortado
+  const normalizado = cortado.replace(/^\s*E\s+cen[aá]rio\s*:/gim, 'Cenário:');
+
+  const semMeta = normalizado
     .split(/\r?\n/)
     .filter((line) => {
       const l = line.trim();
@@ -315,13 +380,17 @@ function filtrarRespostaBdd(texto) {
     })
     .join('\n');
 
-  return sanitizarFeatureBdd(semMeta);
+  const limpo = sanitizarFeatureBdd(semMeta);
+  const blocosDev = parseCenariosDevBlocos(ctx.cenariosTesteDev);
+  return finalizarFeatureBdd(limpo, ctx, { qtdDev: blocosDev.length });
 }
 
 module.exports = {
   generateBDD,
+  prepararCtxBdd,
   buildStructuredBdd,
   prepareCtxForBdd,
   filtrarRespostaBdd,
+  finalizarFeatureBdd,
   bddLlmOutputValido,
 };

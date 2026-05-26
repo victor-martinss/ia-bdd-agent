@@ -914,9 +914,12 @@ function ctxTemCamposEstruturados(ctx) {
 
 /** Passos para Quando: prioriza passos NGF; descrição só se não houver passos. */
 function resolverPassosReproducao(ctx) {
-  const merged = mergePassosFontes(ctx.passos, ctx.descricao);
+  const passos = ctx.passosFiltrados || ctx.passos;
+  const desc = ctx.descricaoFiltrada || ctx.descricao;
+  const evid = Array.isArray(ctx.passosEvidencia) ? ctx.passosEvidencia.join('\n') : '';
+  const merged = mergePassosFontes(passos, evid, desc);
   if (merged) return merged;
-  if (limparTexto(ctx.passos)) return ctx.passos;
+  if (limparTexto(passos)) return passos;
   return '';
 }
 
@@ -995,7 +998,8 @@ function aplicarLimiteEPorCenarioNaFeature(feature) {
 function sanitizarFeatureBdd(feature) {
   if (!feature || typeof feature !== 'string') return '';
 
-  const linhas = feature.split(/\r?\n/);
+  let texto = feature.replace(/^\s*E\s+cen[aá]rio\s*:/gim, 'Cenário:');
+  const linhas = texto.split(/\r?\n/);
   const out = [];
 
   for (const line of linhas) {

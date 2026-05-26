@@ -7,17 +7,53 @@ function coverageExtraEnabled() {
 }
 
 function maxCenariosExtras() {
-  const n = Number.parseInt(process.env.BDD_COVERAGE_MAX_EXTRA || '3', 10);
-  return Number.isFinite(n) && n >= 0 ? Math.min(n, 6) : 3;
+  const n = Number.parseInt(process.env.BDD_COVERAGE_MAX_EXTRA || '1', 10);
+  return Number.isFinite(n) && n >= 0 ? Math.min(n, 4) : 1;
+}
+
+/** Pontua candidatos de cobertura — maior = mais alinhado ao risco do chamado. */
+function pontuarCoberturaExtra(titulo, ctx, textoConsolidadoLower) {
+  const t = titulo.toLowerCase();
+  const tags = ctx.palavrasChaveTeste || [];
+  let score = 0;
+
+  if (/consist|integr|entre\s+sistemas/.test(t)) {
+    if (tags.includes('integracao') || (textoConsolidadoLower.includes('worklist') && textoConsolidadoLower.includes('portal'))) {
+      score = 95;
+    } else score = 20;
+  } else if (/inv[aá]lid|negativ|valida/.test(t)) {
+    if (/\b(cupom|login|senha|formul|campo\s+obrigat)/i.test(textoConsolidadoLower)) score = 70;
+    else if (tags.includes('valid')) score = 45;
+    else score = 15;
+  } else if (/interrup/.test(t)) {
+    if (/\b(laud[aá]rio|grava[çc]|áudio|reprodu)/i.test(textoConsolidadoLower)) score = 65;
+    else if (/\b(exportar|salvar|enviar)\b/i.test(textoConsolidadoLower)) score = 40;
+    else score = 10;
+  } else if (/permiss/.test(t)) {
+    if (tags.includes('permiss') || /\bperfil\b/i.test(textoConsolidadoLower)) score = 75;
+    else score = 5;
+  } else if (/lista\s+vazia|sem\s+registro/.test(t)) {
+    if (/\b(filtro|pesquisa|sem\s+registro|nenhum\s+resultado)\b/i.test(textoConsolidadoLower)) score = 55;
+    else score = 8;
+  } else if (/smoke|acesso/.test(t)) {
+    score = 12;
+  }
+
+  if (ctx.qaHistorico?.isRetornoQa && /smoke|acesso/.test(t)) score = Math.max(0, score - 40);
+  if (ctx.resultadoObtido && /smoke/.test(t)) score = Math.max(0, score - 30);
+
+  return score;
 }
 
 function textoConsolidado(ctx, blocosDev) {
   const partes = [
     ctx.titulo,
-    ctx.descricao,
-    ctx.passos,
+    ctx.descricaoFiltrada || ctx.descricao,
+    ctx.passosFiltrados || ctx.passos,
     ctx.resultadoEsperado,
-    ctx.evidenceResumo,
+    ctx.resultadoObtido,
+    ctx.evidenceResumoFiltrado || ctx.evidenceResumo,
+    ctx.observacoesTriagemFiltrada || ctx.observacoesTriagem,
     ctx.cenariosTesteDev,
     ...(blocosDev || []).map((b) => `${b.title || ''}\n${b.body || ''}`),
   ];
@@ -64,11 +100,18 @@ function gerarCenariosCoberturaExtra(ctx, blocosDev, nomeFuncionalidade) {
   const foco = nomeFuncionalidadeCurto(nomeFuncionalidade);
   const amb = ctx.ambiente || detectAmbiente(ctx.titulo, ctx.cenariosTesteDev);
 
+  const temFluxoPrincipal =
+    blocosDev.length > 0 ||
+    limparTexto(ctx.passosFiltrados || ctx.passos) ||
+    limparTexto(ctx.descricaoFiltrada || ctx.descricao);
+
   if (
+    !temFluxoPrincipal &&
     !devJaCobre(blocosDev, [/smoke/i, /acesso\s+ao\s+ambiente/i, /acesso\s+inicial/i])
   ) {
-    candidatos.push(
-      montarCenarioExtra(
+    candidatos.push({
+      score: 10,
+      linhas: montarCenarioExtra(
         `Cobertura — smoke de acesso (${amb.label})`,
         ctx,
         `acessar a tela principal de ${foco}`,
@@ -76,8 +119,8 @@ function gerarCenariosCoberturaExtra(ctx, blocosDev, nomeFuncionalidade) {
           ctx,
           `  Então a tela principal de ${amb.label} é exibida sem mensagem de erro de sistema`
         )
-      )
-    );
+      ),
+    });
   }
 
   if (
@@ -85,79 +128,100 @@ function gerarCenariosCoberturaExtra(ctx, blocosDev, nomeFuncionalidade) {
     (t.includes('protocolo') && (t.includes('sincron') || t.includes('compar')))
   ) {
     if (!devJaCobre(blocosDev, [/compar/i, /sincron/i, /entre\s+.*portal/i])) {
-      candidatos.push(
-        montarCenarioExtra(
+      candidatos.push({
+        score: pontuarCoberturaExtra('Cobertura — consistência entre sistemas', ctx, t),
+        linhas: montarCenarioExtra(
           'Cobertura — consistência entre sistemas',
           ctx,
           'registrar o valor exibido no primeiro sistema\nabrir o mesmo registro no segundo sistema\ncomparar o mesmo campo entre os dois ambientes',
           '  Então os dados exibidos são consistentes entre os ambientes consultados'
-        )
-      );
+        ),
+      });
     }
   }
 
   if (
-    !devJaCobre(blocosDev, [/inv[aá]lid/i, /negativ/i, /erro\s+de\s+valida/i, /campo\s+obrigat/i])
+    !devJaCobre(blocosDev, [/inv[aá]lid/i, /negativ/i, /erro\s+de\s+valida/i, /campo\s+obrigat/i]) &&
+    !ctx.resultadoObtido?.match(/protocolo|associa|sincron|entre\s+sistemas/i)
   ) {
-    if (/\b(cpf|cadastro|protocolo|paciente|formul[aá]rio|preench)\b/i.test(t)) {
-      candidatos.push(
-        montarCenarioExtra(
+    if (/\b(cupom|login|senha|formul[aá]rio|campo\s+obrigat|cupom)\b/i.test(t)) {
+      candidatos.push({
+        score: pontuarCoberturaExtra('Cobertura — validação com dado inválido', ctx, t),
+        linhas: montarCenarioExtra(
           'Cobertura — validação com dado inválido',
           ctx,
           'iniciar o fluxo principal do chamado\ninformar dado inválido ou deixar campo obrigatório vazio\nconfirmar ou salvar',
           '  Então uma mensagem de validação é exibida e o fluxo não conclui incorretamente'
-        )
-      );
+        ),
+      });
     }
   }
 
   if (!devJaCobre(blocosDev, [/cancel/i, /interromp/i, /sair\s+sem/i, /fechar\s+sem/i])) {
-    if (/\b(laud[aá]rio|grava[çc][aã]o|salvar|exportar|enviar)\b/i.test(t)) {
-      candidatos.push(
-        montarCenarioExtra(
+    if (/\b(laud[aá]rio|grava[çc][aã]o|áudio|reprodu)/i.test(t)) {
+      candidatos.push({
+        score: pontuarCoberturaExtra('Cobertura — interrupção do fluxo', ctx, t),
+        linhas: montarCenarioExtra(
           'Cobertura — interrupção do fluxo',
           ctx,
           'iniciar a ação principal do chamado\ninterromper ou sair sem concluir a operação',
           '  Então o sistema não apresenta erro indevido nem perda inconsistente de dados'
-        )
-      );
+        ),
+      });
     }
   }
 
   if (!devJaCobre(blocosDev, [/permiss[aã]o|n[aã]o\s+autorizado|acesso\s+negado/i])) {
     if (/\b(perfil|permiss[aã]o|usu[aá]rio\s+sem)\b/i.test(t)) {
-      candidatos.push(
-        montarCenarioExtra(
+      candidatos.push({
+        score: pontuarCoberturaExtra('Cobertura — usuário sem permissão', ctx, t),
+        linhas: montarCenarioExtra(
           'Cobertura — usuário sem permissão',
           ctx,
           'acessar o módulo com usuário de perfil restrito\ntentar executar a ação do chamado',
           '  Então o acesso é bloqueado ou a ação não é permitida conforme regra de perfil'
-        )
-      );
+        ),
+      });
     }
   }
 
   if (
     !devJaCobre(blocosDev, [/lista\s+vazia|nenhum\s+registro|sem\s+exame|edge/i]) &&
-    /\b(lista|filtro|pesquisa|worklist|grid)\b/i.test(t)
+    /\b(filtro|pesquisa|sem\s+registro|nenhum\s+resultado)\b/i.test(t)
   ) {
-    candidatos.push(
-      montarCenarioExtra(
+    candidatos.push({
+      score: pontuarCoberturaExtra('Cobertura — lista sem registros', ctx, t),
+      linhas: montarCenarioExtra(
         'Cobertura — lista sem registros',
         ctx,
         'aplicar filtro que não retorna resultados\nvisualizar a área de listagem',
         '  Então é exibido estado vazio ou mensagem informativa sem erro de sistema'
-      )
-    );
+      ),
+    });
   }
 
   const vistos = new Set();
+  const blobDev = textoConsolidado(ctx, blocosDev);
+  const ranqueados = candidatos
+    .map((c) => ({
+      ...c,
+      score: c.score ?? pontuarCoberturaExtra((c.linhas[0] || '').replace(/^Cenário:\s*/i, ''), ctx, t),
+    }))
+    .filter((c) => c.score >= 40)
+    .sort((a, b) => b.score - a.score);
+
   const unicos = [];
-  for (const c of candidatos) {
-    const titulo = (c[0] || '').replace(/^Cenário:\s*/i, '').trim();
+  for (const c of ranqueados) {
+    const linhas = c.linhas;
+    const titulo = (linhas[0] || '').replace(/^Cenário:\s*/i, '').trim();
     if (vistos.has(titulo)) continue;
+
+    const entaoLinha = linhas.find((l) => /^\s*então\s+/i.test(l)) || '';
+    const entaoNorm = entaoLinha.replace(/^\s*então\s+/i, '').toLowerCase().slice(0, 50);
+    if (entaoNorm && blobDev.includes(entaoNorm.slice(0, 30))) continue;
+
     vistos.add(titulo);
-    unicos.push(c);
+    unicos.push(linhas);
     if (unicos.length >= max) break;
   }
 
@@ -181,4 +245,6 @@ module.exports = {
   maxCenariosExtras,
   gerarCenariosCoberturaExtra,
   cabecalhoCobertura,
+  textoConsolidado,
+  montarCenarioExtra,
 };
