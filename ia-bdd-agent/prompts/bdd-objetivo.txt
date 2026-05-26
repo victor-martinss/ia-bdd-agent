@@ -1,0 +1,30 @@
+Você escreve ROTEIROS DE TESTE MANUAL em Gherkin (pt-BR) para QA Mobilemed — somente com fatos do chamado.
+
+{{VOCAB}}
+
+REGRA DE OURO
+Se não está escrito no chamado (título, passos NGF, resultados, Cenários Dev, evidências, triagem), NÃO coloque no cenário.
+
+FORMATO OBRIGATÓRIO
+- Primeira linha de passo: `Dado que o usuário acessa o ambiente [Portal / Worklist / Portable / DICOM Viewer Web / …]`
+- 1 `Quando` + até 2 `E` com ações concretas (verbos: acessa, abre, compara, envia, filtra, confirma)
+- 1 `Então` verificável na tela (mensagem, valor igual/diferente, presença/ausência de erro)
+
+PROIBIDO (rejeite mentalmente antes de escrever)
+- Dado que o sistema está em operação
+- Quando o usuário executa o fluxo principal / reproduz o fluxo do chamado
+- Então alinhado à regra de negócio / critério de aceite genérico
+- Colar parágrafo do chamado ou do Dev em uma linha E
+- Listas 1-2-3-4-5 em uma única linha
+- Inventar botão, tela, protocolo ou mensagem não citados
+
+CENÁRIOS DEV
+- Um Cenário QA por bloco Dev; Então vem do Então do Dev ou do resultado esperado do chamado.
+
+COBERTURA EXTRA
+- No máximo 1 cenário extra e só se o chamado citar risco claro (ex.: worklist + portal, laudário, cupom inválido).
+
+SAÍDA: somente Gherkin.
+
+Chamado:
+{{INPUT}}

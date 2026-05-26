@@ -4,6 +4,7 @@ const {
   primeiraFrase,
   stripTextoAdministrativo,
 } = require('./bdd-gherkin');
+const { entaoEhVago, extrairEntaoDoTexto } = require('./bdd-rigor');
 
 /**
  * Extrai critérios de validação assertivos a partir dos campos do chamado.
@@ -18,6 +19,7 @@ function extrairValidacoesExatas(ctx) {
     const t = stripTextoAdministrativo(String(texto || ''));
     if (!t || t.length < 8) return;
     const entao = entaoVerificavel(t) || t.slice(0, 110);
+    if (entaoEhVago(entao)) return;
     const key = entao.toLowerCase();
     if (seen.has(key)) return;
     seen.add(key);
@@ -63,36 +65,37 @@ function extrairValidacoesExatas(ctx) {
  * Monta bloco de Então assertivo (com referência a evidência quando houver).
  */
 function entaoAssertivoDoContexto(ctx, textoDevFallback = '') {
+  const corpoBloco = limparTexto(textoDevFallback);
+  const fromDevText = extrairEntaoDoTexto(corpoBloco);
+  if (fromDevText) {
+    const ev = entaoVerificavel(fromDevText);
+    if (ev && !entaoEhVago(ev)) return `  Então ${ev}`;
+  }
+
+  if (corpoBloco) return null;
+
   const validacoes = extrairValidacoesExatas(ctx);
-  if (validacoes.length === 1) {
+  if (validacoes.length === 1 && !entaoEhVago(validacoes[0].entao)) {
     return `  Então ${validacoes[0].entao}`;
   }
   if (validacoes.length > 1) {
-    const principal = validacoes.find((v) => v.origem.includes('esperado')) || validacoes[0];
-    return `  Então ${principal.entao}`;
+    const principal =
+      validacoes.find((v) => v.origem.includes('esperado') && !entaoEhVago(v.entao)) ||
+      validacoes.find((v) => !entaoEhVago(v.entao));
+    if (principal) return `  Então ${principal.entao}`;
   }
 
-  if (ctx.evidenceResumo && limparTexto(ctx.evidenceResumo)) {
-    const frase = primeiraFrase(ctx.evidenceResumo);
-    const ev = entaoVerificavel(frase);
-    if (ev) return `  Então ${ev}`;
+  if (ctx.evidenceValidacoes?.length) {
+    const ev = entaoVerificavel(ctx.evidenceValidacoes[0]);
+    if (ev && !entaoEhVago(ev)) return `  Então ${ev}`;
   }
 
   if (!onlyTitleMode(ctx) && ctx.resultadoEsperado) {
     const entao = entaoVerificavel(ctx.resultadoEsperado);
-    if (entao) return `  Então ${entao}`;
+    if (entao && !entaoEhVago(entao)) return `  Então ${entao}`;
   }
 
-  const fromDev = String(textoDevFallback || '')
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .find((l) => /^ent[aã]o\s/i.test(l));
-  if (fromDev) {
-    const ev = entaoVerificavel(fromDev.replace(/^ent[aã]o\s*/i, ''));
-    if (ev) return `  Então ${ev}`;
-  }
-
-  return '  Então o comportamento na tela corresponde ao critério de aceite do chamado';
+  return null;
 }
 
 function onlyTitleMode(ctx) {

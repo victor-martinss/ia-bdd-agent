@@ -60,6 +60,32 @@ function textoConsolidado(ctx, blocosDev) {
   return partes.join('\n').toLowerCase();
 }
 
+/** Somente campos NGF/evidências analisados (sem Cenários Dev) — gatilho de cobertura extra. */
+function textoCamposAnalisados(ctx) {
+  return [
+    ctx.titulo,
+    ctx.descricaoFiltrada || ctx.descricao,
+    ctx.passosFiltrados || ctx.passos,
+    ctx.resultadoEsperado,
+    ctx.resultadoObtido,
+    ctx.evidenceResumoFiltrado || ctx.evidenceResumo,
+    ctx.observacoesTriagemFiltrada || ctx.observacoesTriagem,
+  ]
+    .filter(Boolean)
+    .join('\n')
+    .toLowerCase();
+}
+
+function temCamposNgfParaCobertura(ctx) {
+  return !!(
+    limparTexto(ctx.passosFiltrados || ctx.passos) ||
+    limparTexto(ctx.descricaoFiltrada || ctx.descricao) ||
+    limparTexto(ctx.resultadoEsperado) ||
+    limparTexto(ctx.resultadoObtido) ||
+    limparTexto(ctx.evidenceResumoFiltrado || ctx.evidenceResumo)
+  );
+}
+
 function entaoExtraAssertivo(ctx, fallback) {
   if (process.env.BDD_ASSERTIVE_MODE === '0') return fallback;
   const vals = extrairValidacoesExatas(ctx);
@@ -78,9 +104,10 @@ function montarCenarioExtra(titulo, ctx, passosTexto, entao) {
     dadoAcessaAmbiente(ctx.ambiente || detectAmbiente(ctx.titulo, ctx.cenariosTesteDev)),
   ];
   const quando = passosParaStepsGherkin(passosTexto);
-  if (quando.length) linhas.push(...quando);
-  else linhas.push('  Quando o usuário executa o fluxo complementar de cobertura');
-  linhas.push(entao || '  Então o comportamento esperado é observado na tela sem erro');
+  if (!quando.length) return null;
+  linhas.push(...quando);
+  if (!entao || /comportamento esperado é observado/i.test(entao)) return null;
+  linhas.push(entao);
   return linhas;
 }
 
@@ -93,10 +120,24 @@ function montarCenarioExtra(titulo, ctx, passosTexto, entao) {
  */
 function gerarCenariosCoberturaExtra(ctx, blocosDev, nomeFuncionalidade) {
   if (!coverageExtraEnabled()) return [];
+  if (blocosDev.length > 0) return [];
+
+  if (
+    limparTexto(ctx.passosFiltrados || ctx.passos) &&
+    ctx.resultadoObtido &&
+    ctx.resultadoEsperado
+  ) {
+    return [];
+  }
+
+  if (!temCamposNgfParaCobertura(ctx)) return [];
 
   const max = maxCenariosExtras();
+  if (max <= 0) return [];
+
   const candidatos = [];
-  const t = textoConsolidado(ctx, blocosDev);
+  const t = textoCamposAnalisados(ctx);
+  const blobDev = textoConsolidado(ctx, blocosDev);
   const foco = nomeFuncionalidadeCurto(nomeFuncionalidade);
   const amb = ctx.ambiente || detectAmbiente(ctx.titulo, ctx.cenariosTesteDev);
 
@@ -109,18 +150,18 @@ function gerarCenariosCoberturaExtra(ctx, blocosDev, nomeFuncionalidade) {
     !temFluxoPrincipal &&
     !devJaCobre(blocosDev, [/smoke/i, /acesso\s+ao\s+ambiente/i, /acesso\s+inicial/i])
   ) {
-    candidatos.push({
-      score: 10,
-      linhas: montarCenarioExtra(
-        `Cobertura — smoke de acesso (${amb.label})`,
+    const linhasSmoke = montarCenarioExtra(
+      `Cobertura — smoke de acesso (${amb.label})`,
+      ctx,
+      `o usuário acessa a tela principal de ${foco}`,
+      entaoExtraAssertivo(
         ctx,
-        `acessar a tela principal de ${foco}`,
-        entaoExtraAssertivo(
-          ctx,
-          `  Então a tela principal de ${amb.label} é exibida sem mensagem de erro de sistema`
-        )
-      ),
-    });
+        `  Então a tela principal de ${amb.label} é exibida sem mensagem de erro de sistema`
+      )
+    );
+    if (linhasSmoke) {
+      candidatos.push({ score: 10, linhas: linhasSmoke });
+    }
   }
 
   if (
@@ -128,15 +169,18 @@ function gerarCenariosCoberturaExtra(ctx, blocosDev, nomeFuncionalidade) {
     (t.includes('protocolo') && (t.includes('sincron') || t.includes('compar')))
   ) {
     if (!devJaCobre(blocosDev, [/compar/i, /sincron/i, /entre\s+.*portal/i])) {
-      candidatos.push({
-        score: pontuarCoberturaExtra('Cobertura — consistência entre sistemas', ctx, t),
-        linhas: montarCenarioExtra(
-          'Cobertura — consistência entre sistemas',
-          ctx,
-          'registrar o valor exibido no primeiro sistema\nabrir o mesmo registro no segundo sistema\ncomparar o mesmo campo entre os dois ambientes',
-          '  Então os dados exibidos são consistentes entre os ambientes consultados'
-        ),
-      });
+      const linhasInteg = montarCenarioExtra(
+        'Cobertura — consistência entre sistemas',
+        ctx,
+        'registrar o valor exibido no primeiro sistema\nabrir o mesmo registro no segundo sistema\ncomparar o mesmo campo entre os dois ambientes',
+        '  Então os dados exibidos são consistentes entre os ambientes consultados'
+      );
+      if (linhasInteg) {
+        candidatos.push({
+          score: pontuarCoberturaExtra('Cobertura — consistência entre sistemas', ctx, t),
+          linhas: linhasInteg,
+        });
+      }
     }
   }
 
@@ -145,29 +189,41 @@ function gerarCenariosCoberturaExtra(ctx, blocosDev, nomeFuncionalidade) {
     !ctx.resultadoObtido?.match(/protocolo|associa|sincron|entre\s+sistemas/i)
   ) {
     if (/\b(cupom|login|senha|formul[aá]rio|campo\s+obrigat|cupom)\b/i.test(t)) {
-      candidatos.push({
-        score: pontuarCoberturaExtra('Cobertura — validação com dado inválido', ctx, t),
-        linhas: montarCenarioExtra(
-          'Cobertura — validação com dado inválido',
+      const linhasVal = montarCenarioExtra(
+        'Cobertura — validação com dado inválido',
+        ctx,
+        ctx.passosFiltrados || ctx.passos,
+        entaoExtraAssertivo(
           ctx,
-          'iniciar o fluxo principal do chamado\ninformar dado inválido ou deixar campo obrigatório vazio\nconfirmar ou salvar',
           '  Então uma mensagem de validação é exibida e o fluxo não conclui incorretamente'
-        ),
-      });
+        )
+      );
+      if (linhasVal) {
+        candidatos.push({
+          score: pontuarCoberturaExtra('Cobertura — validação com dado inválido', ctx, t),
+          linhas: linhasVal,
+        });
+      }
     }
   }
 
-  if (!devJaCobre(blocosDev, [/cancel/i, /interromp/i, /sair\s+sem/i, /fechar\s+sem/i])) {
+  if (
+    blocosDev.length === 0 &&
+    !devJaCobre(blocosDev, [/cancel/i, /interromp/i, /sair\s+sem/i, /fechar\s+sem/i])
+  ) {
     if (/\b(laud[aá]rio|grava[çc][aã]o|áudio|reprodu)/i.test(t)) {
-      candidatos.push({
-        score: pontuarCoberturaExtra('Cobertura — interrupção do fluxo', ctx, t),
-        linhas: montarCenarioExtra(
-          'Cobertura — interrupção do fluxo',
-          ctx,
-          'iniciar a ação principal do chamado\ninterromper ou sair sem concluir a operação',
-          '  Então o sistema não apresenta erro indevido nem perda inconsistente de dados'
-        ),
-      });
+      const linhasInt = montarCenarioExtra(
+        'Cobertura — interrupção do fluxo',
+        ctx,
+        ctx.passosFiltrados || ctx.passos,
+        entaoExtraAssertivo(ctx, '  Então nenhuma mensagem de erro é exibida ao sair do fluxo')
+      );
+      if (linhasInt) {
+        candidatos.push({
+          score: pontuarCoberturaExtra('Cobertura — interrupção do fluxo', ctx, t),
+          linhas: linhasInt,
+        });
+      }
     }
   }
 
@@ -187,7 +243,8 @@ function gerarCenariosCoberturaExtra(ctx, blocosDev, nomeFuncionalidade) {
 
   if (
     !devJaCobre(blocosDev, [/lista\s+vazia|nenhum\s+registro|sem\s+exame|edge/i]) &&
-    /\b(filtro|pesquisa|sem\s+registro|nenhum\s+resultado)\b/i.test(t)
+    /\b(filtro|pesquisa|sem\s+registro|nenhum\s+resultado)\b/i.test(t) &&
+    !blobDev.includes('lista vazia')
   ) {
     candidatos.push({
       score: pontuarCoberturaExtra('Cobertura — lista sem registros', ctx, t),
@@ -201,13 +258,12 @@ function gerarCenariosCoberturaExtra(ctx, blocosDev, nomeFuncionalidade) {
   }
 
   const vistos = new Set();
-  const blobDev = textoConsolidado(ctx, blocosDev);
   const ranqueados = candidatos
     .map((c) => ({
       ...c,
       score: c.score ?? pontuarCoberturaExtra((c.linhas[0] || '').replace(/^Cenário:\s*/i, ''), ctx, t),
     }))
-    .filter((c) => c.score >= 40)
+    .filter((c) => c.score >= 60)
     .sort((a, b) => b.score - a.score);
 
   const unicos = [];

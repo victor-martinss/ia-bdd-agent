@@ -51,6 +51,10 @@ const PROMPT_CATALOG = {
     file: 'bdd-coverage-assertivo.txt',
     label: 'Cobertura ampla + validações exatas',
   },
+  objetivo: {
+    file: 'bdd-objetivo.txt',
+    label: 'Roteiro objetivo anti-alucinação',
+  },
 };
 
 function listPromptModes() {
@@ -134,6 +138,10 @@ function detectPromptMode(ctx, title) {
 
   if (ctx.qaHistorico?.isRetornoQa || /\b(reprov|retorn|regress)\b/i.test(t)) {
     return 'regressao';
+  }
+
+  if (process.env.BDD_ASSERTIVE_MODE !== '0') {
+    return 'objetivo';
   }
 
   if (process.env.BDD_COVERAGE_EXTRA !== '0' && process.env.BDD_ASSERTIVE_MODE !== '0') {

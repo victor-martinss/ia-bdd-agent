@@ -76,6 +76,103 @@ function extrairEntao(cenario) {
   return m ? m.trim() : '';
 }
 
+function extrairQuando(cenario) {
+  const m = cenario.linhas.find((l) => /^\s*quando\s+/i.test(l.trim()));
+  return m ? m.trim() : '';
+}
+
+function normalizarEntao(cenario) {
+  return normalizarTexto(extrairEntao(cenario).replace(/^\s*ent[aã]o\s+/i, ''));
+}
+
+function normalizarQuando(cenario) {
+  return normalizarTexto(extrairQuando(cenario).replace(/^\s*quando\s+/i, ''));
+}
+
+function cenarioEhSomenteMeta(cenario) {
+  const t = normalizarTexto(cenario.titulo);
+  return /automa[çc][aã]o|testes?\s+unit|somente\s+ci\b/.test(t);
+}
+
+const ROTULOS_DISTINTOS = [
+  'enviados',
+  'recebidos',
+  'todos',
+  'sem filtro',
+  'compartilhamento',
+  'empresas',
+  'performance',
+  'regressao',
+  'meus exames',
+  'atencao',
+  'filtro todos',
+  'nova aba',
+  'tabela',
+];
+
+function rotuloDistintoDoTitulo(titulo) {
+  const t = normalizarTexto(titulo);
+  return ROTULOS_DISTINTOS.find((k) => t.includes(k)) || '';
+}
+
+function cenariosTemRotulosDistintos(cen, prev) {
+  const r1 = rotuloDistintoDoTitulo(cen.titulo);
+  const r2 = rotuloDistintoDoTitulo(prev.titulo);
+  return r1 && r2 && r1 !== r2;
+}
+
+function cenariosSaoRedundantes(cen, prev, limiar) {
+  if (cenariosTemRotulosDistintos(cen, prev)) return false;
+
+  const simTitulo = similaridade(cen.titulo, prev.titulo);
+  const entaoA = normalizarEntao(cen);
+  const entaoB = normalizarEntao(prev);
+  const simEntao = similaridade(entaoA, entaoB);
+
+  if (simTitulo >= limiar && simEntao >= limiar - 0.1) return true;
+  if (simEntao >= limiar && simTitulo >= 0.5) return true;
+
+  if (entaoA.length >= 24 && entaoB.length >= 24) {
+    const fragA = entaoA.slice(0, 50);
+    const fragB = entaoB.slice(0, 50);
+    if (
+      (entaoA.includes(fragB) || entaoB.includes(fragA)) &&
+      simTitulo >= 0.55 &&
+      simEntao >= 0.72
+    ) {
+      return true;
+    }
+  }
+
+  const quandoA = normalizarQuando(cen);
+  const quandoB = normalizarQuando(prev);
+  if (
+    quandoA &&
+    quandoB &&
+    similaridade(quandoA, quandoB) >= limiar + 0.06 &&
+    simEntao >= 0.62
+  ) {
+    return true;
+  }
+
+  const httpA = entaoA.match(/\b(403|400|404|200|401)\b/);
+  const httpB = entaoB.match(/\b(403|400|404|200|401)\b/);
+  if (
+    httpA &&
+    httpB &&
+    httpA[1] === httpB[1] &&
+    simTitulo >= 0.72 &&
+    simEntao >= 0.65 &&
+    /post|get|rota|endpoint|api/i.test(cen.titulo + prev.titulo)
+  ) {
+    return true;
+  }
+
+  if (/^cobertura\s*—/i.test(cen.titulo) && simEntao >= 0.62) return true;
+
+  return false;
+}
+
 function classificarCenario(cenario, ctx) {
   const t = normalizarTexto(cenario.titulo);
   const blob = normalizarTexto(cenario.texto);
@@ -123,57 +220,51 @@ function contarBlocosDev(ctx, meta = {}) {
   if (Array.isArray(ctx._ordemDev) && ctx._ordemDev.length) return ctx._ordemDev.length;
   const dev = String(ctx.cenariosTesteDev || '');
   if (!dev.trim()) return 0;
+  if (/^#{1,3}\s+/m.test(dev)) {
+    const { parseCenariosDevBlocos } = require('./bdd-gherkin');
+    return parseCenariosDevBlocos(dev).length;
+  }
   const matches = dev.match(/^\s*(?:cenário|cenario)\s*:/gim);
-  return matches ? matches.length : 1;
+  return matches ? matches.length : dev.trim() ? 1 : 0;
 }
 
 /**
- * Teto de cenários por feature. Com 2+ blocos Dev, sobe para 5 (4 se retorno QA).
- * Override: BDD_MAX_SCENARIOS.
+ * Teto opcional de cenários por feature (só se BDD_MAX_SCENARIOS estiver definido).
+ * Sem variável: sem limite — redundâncias são removidas por dedup.
  */
-function maxTotalCenarios(ctx, meta = {}) {
+function maxTotalCenarios() {
   const fromEnv = Number.parseInt(process.env.BDD_MAX_SCENARIOS || '', 10);
-  if (Number.isFinite(fromEnv) && fromEnv >= 2) return Math.min(fromEnv, 8);
-
-  const qtdDev = contarBlocosDev(ctx, meta);
-  if (qtdDev >= 2) {
-    return ctx.qaHistorico?.isRetornoQa ? 4 : 5;
-  }
-  if (ctx.qaHistorico?.isRetornoQa) return 3;
-  return 4;
+  if (Number.isFinite(fromEnv) && fromEnv >= 1) return fromEnv;
+  return Infinity;
 }
 
 function removerCenariosRedundantes(cenarios, ctx) {
   const limiar =
-    Number.parseFloat(process.env.BDD_DEDUP_SIMILARITY || '0.68') || 0.68;
+    Number.parseFloat(process.env.BDD_DEDUP_SIMILARITY || '0.62') || 0.62;
   const kept = [];
   const removidos = [];
 
   for (const cen of cenarios) {
-    const entao = extrairEntao(cen);
-    const assinatura = `${normalizarTexto(cen.titulo)}|${normalizarTexto(entao)}|${normalizarTexto(
-      cen.linhas.filter((l) => /^\s*(quando|e)\s+/i.test(l)).join(' ')
-    )}`;
+    if (cenarioEhSomenteMeta(cen)) {
+      removidos.push(cen.titulo);
+      continue;
+    }
 
     let duplicata = false;
     for (const prev of kept) {
-      const simTitulo = similaridade(cen.titulo, prev.titulo);
-      const simEntao = similaridade(extrairEntao(cen), extrairEntao(prev));
-      const simAssin = similaridade(assinatura, `${normalizarTexto(prev.titulo)}|${normalizarTexto(extrairEntao(prev))}`);
+      if (!cenariosSaoRedundantes(cen, prev, limiar)) continue;
 
-      if (simTitulo >= limiar || (simEntao >= limiar && simTitulo >= 0.45) || simAssin >= limiar) {
-        const scoreCen = classificarCenario(cen, ctx);
-        const scorePrev = classificarCenario(prev, ctx);
-        if (scoreCen < scorePrev) {
-          duplicata = true;
-          removidos.push(cen.titulo);
-          break;
-        }
-        const idx = kept.indexOf(prev);
-        kept.splice(idx, 1);
-        removidos.push(prev.titulo);
+      const scoreCen = classificarCenario(cen, ctx);
+      const scorePrev = classificarCenario(prev, ctx);
+      if (scoreCen < scorePrev) {
+        duplicata = true;
+        removidos.push(cen.titulo);
         break;
       }
+      const idx = kept.indexOf(prev);
+      kept.splice(idx, 1);
+      removidos.push(prev.titulo);
+      break;
     }
     if (!duplicata) kept.push(cen);
   }
@@ -189,11 +280,26 @@ function devJaCobreTexto(blob, padroes) {
  * Lacunas: validações do chamado sem Então correspondente nos cenários gerados.
  * @returns {string[][]}
  */
-function gerarCenariosLacunas(ctx, cenariosExistentes) {
+function gerarCenariosLacunas(ctx, cenariosExistentes, meta = {}) {
   if (process.env.BDD_GAP_SCENARIOS === '0') return [];
 
+  const qtdDev = contarBlocosDev(ctx, meta);
+  if (qtdDev > 0) return [];
+
+  const { ctxTemCamposEstruturados } = require('./bdd-gherkin');
+  if (!ctxTemCamposEstruturados(ctx)) return [];
+
   const blob = cenariosExistentes.map((c) => c.texto).join('\n').toLowerCase();
-  const consolidado = textoConsolidado(ctx, []);
+  const camposNgf = [
+    ctx.descricaoFiltrada || ctx.descricao,
+    ctx.passosFiltrados || ctx.passos,
+    ctx.resultadoEsperado,
+    ctx.resultadoObtido,
+    ctx.evidenceResumoFiltrado || ctx.evidenceResumo,
+  ]
+    .filter(Boolean)
+    .join('\n')
+    .toLowerCase();
   const lacunas = [];
   const max = Number.parseInt(process.env.BDD_GAP_MAX || '1', 10) || 1;
   const temDefeito = devJaCobreTexto(blob, [/defeito|obtido|incorreto|mas\s+o\s+esperado/i]);
@@ -202,7 +308,10 @@ function gerarCenariosLacunas(ctx, cenariosExistentes) {
   for (const v of validacoes) {
     if (v.origem.includes('obtido') && temDefeito) continue;
     if (v.origem.includes('descri') && temDefeito) continue;
-    if (v.origem.includes('esperado') && devJaCobreTexto(blob, [/valida[cç][aã]o\s+principal|então/i])) {
+    if (
+      v.origem.includes('esperado') &&
+      devJaCobreTexto(blob, [/valida[cç][aã]o\s+principal|então|protocolo|associar|comparar/i])
+    ) {
       const fragEsp = normalizarTexto(v.entao).slice(0, 30);
       if (fragEsp && blob.includes(fragEsp.slice(0, 20))) continue;
     }
@@ -221,19 +330,24 @@ function gerarCenariosLacunas(ctx, cenariosExistentes) {
   }
 
   if (lacunas.length < max && ctx.resultadoObtido && !temDefeito) {
-    lacunas.push(
-      montarCenarioExtra(
-        'Lacuna — reprodução do defeito reportado',
-        ctx,
-        ctx.passosFiltrados || ctx.passos || 'reproduzir o fluxo do chamado',
-        `  Então ${String(ctx.resultadoObtido).slice(0, 110)}`
-      )
-    );
+    const { entaoVerificavel } = require('./bdd-gherkin');
+    const ev = entaoVerificavel(ctx.resultadoObtido);
+    if (ev) {
+      lacunas.push(
+        montarCenarioExtra(
+          'Lacuna — reprodução do defeito reportado',
+          ctx,
+          ctx.passosFiltrados || ctx.passos,
+          `  Então ${ev}`
+        )
+      );
+    }
   }
 
   if (
     lacunas.length < max &&
-    (consolidado.includes('worklist') && consolidado.includes('portal')) &&
+    camposNgf.includes('worklist') &&
+    camposNgf.includes('portal') &&
     !devJaCobreTexto(blob, [/compar|sincron|consist/i])
   ) {
     lacunas.push(
@@ -268,7 +382,7 @@ function montarCabecalhoPlano(ctx, qtdDev, qtdExtra, qtdLacunas, removidos) {
     linhas.push(`# ${ctx.resumoObjetivo.slice(0, 200)}`);
   }
   if (removidos.length) {
-    linhas.push(`# Redundantes removidos: ${removidos.slice(0, 4).join('; ')}`);
+    linhas.push(`# Redundantes removidos: ${removidos.slice(0, 6).join('; ')}`);
   }
   return linhas;
 }
@@ -286,15 +400,25 @@ function planificarFeatureBdd(feature, ctx, meta = {}) {
   if (!cenarios.length) return feature;
 
   const { cenarios: semDup, removidos } = removerCenariosRedundantes(cenarios, ctx);
-  const lacunas = gerarCenariosLacunas(ctx, semDup).map((linhas) => ({
-    titulo: (linhas[0] || '').replace(/^Cenário:\s*/i, '').trim(),
-    linhas,
-    texto: linhas.join('\n'),
-  }));
+  const lacunasRaw = gerarCenariosLacunas(ctx, semDup, meta)
+    .filter(Boolean)
+    .map((linhas) => ({
+      titulo: (linhas[0] || '').replace(/^Cenário:\s*/i, '').trim(),
+      linhas,
+      texto: linhas.join('\n'),
+    }));
+  const { cenarios: lacunas, removidos: remLac } = removerCenariosRedundantes(
+    lacunasRaw,
+    ctx
+  );
+  removidos.push(...remLac);
 
   let todos = ordenarCenarios([...semDup, ...lacunas], ctx);
+  const { cenarios: finais, removidos: remFinal } = removerCenariosRedundantes(todos, ctx);
+  removidos.push(...remFinal);
+  todos = finais;
   const cap = maxTotalCenarios(ctx, meta);
-  if (todos.length > cap) {
+  if (Number.isFinite(cap) && todos.length > cap) {
     const removidosCap = todos.slice(cap).map((c) => c.titulo);
     todos = todos.slice(0, cap);
     removidos.push(...removidosCap);

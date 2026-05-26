@@ -25,6 +25,7 @@ const {
   dividirCenarioCompletoPorMaxE,
   nomeFuncionalidadeCurto,
   limparTexto,
+  entaoDoContexto,
 } = require('../utils/bdd-gherkin');
 
 /** @deprecated use enrichCtxWithEvidence — mantido para testes/scripts */
@@ -64,6 +65,54 @@ function buildStructuredBdd(title, ctx) {
   out.push('');
 
   if (blocosDev.length > 0) {
+    if (
+      !onlyTitleAndDevSources() &&
+      ctx.resultadoObtido &&
+      limparTexto(ctx.resultadoObtido)
+    ) {
+      const { entaoVerificavel, resolverPassosReproducao } = require('../utils/bdd-gherkin');
+      const { entaoEhVago, quandoSubstituto } = require('../utils/bdd-rigor');
+      const obtido = entaoVerificavel(ctx.resultadoObtido);
+      const blobDev = blocosDev.map((b) => `${b.title || ''}\n${b.body || ''}`).join('\n');
+      const defeitoJaNoDev = obtido && new RegExp(obtido.slice(0, 24).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(blobDev);
+      if (obtido && !entaoEhVago(obtido) && !defeitoJaNoDev) {
+        const tituloDefeito = `${nomeFuncionalidadeCurto(nomeFuncionalidade)} — defeito observado`;
+        const esperado = ctx.resultadoEsperado
+          ? entaoVerificavel(ctx.resultadoEsperado)
+          : '';
+        const mas =
+          esperado && !entaoEhVago(esperado) ? `    Mas o esperado era ${esperado}` : null;
+        const chunks = passosParaStepsGherkinComContinuacao(resolverPassosReproducao(ctx));
+        const quandoFb = quandoSubstituto(ctx);
+        const partesDefeito =
+          chunks.length > 0
+            ? chunks.map((passos, idx) => {
+                const suffix = idx > 0 ? ` — continuação` : '';
+                const linhas = [
+                  `Cenário: ${tituloDefeito}${suffix}`,
+                  ...montarDadosIniciais(ctx),
+                  ...passos,
+                ];
+                if (idx === chunks.length - 1) {
+                  linhas.push(`  Então ${obtido}`);
+                  if (mas) linhas.push(mas);
+                }
+                return linhas;
+              })
+            : quandoFb
+              ? dividirCenarioCompletoPorMaxE(tituloDefeito, [
+                  ...montarDadosIniciais(ctx),
+                  quandoFb,
+                  `  Então ${obtido}`,
+                  ...(mas ? [mas] : []),
+                ])
+              : [];
+        for (const linhas of partesDefeito) {
+          out.push(...linhas);
+          out.push('');
+        }
+      }
+    }
     for (const bloco of blocosDev) {
       for (const linhas of cenariosQaAPartirDoDev(bloco, ctx, nomeFuncionalidade)) {
         out.push(...linhas);
@@ -79,11 +128,16 @@ function buildStructuredBdd(title, ctx) {
     if (limparTexto(ctx.cenariosTesteDev)) {
       corpo.push(...devCenariosParaPassosE(ctx.cenariosTesteDev));
     }
-    corpo.push(...passosAPartirDoTitulo(nomeFuncionalidade));
-    corpo.push(entaoAPartirDoTitulo(nomeFuncionalidade));
-    for (const linhas of dividirCenarioCompletoPorMaxE(titulo, corpo)) {
-      out.push(...linhas);
-      out.push('');
+    const passosTit = passosAPartirDoTitulo(nomeFuncionalidade);
+    if (passosTit.length) corpo.push(...passosTit);
+    const entaoTit =
+      entaoAPartirDoTitulo(nomeFuncionalidade) || entaoDoContexto(ctx, '');
+    if (entaoTit) corpo.push(entaoTit);
+    if (corpo.length >= 3) {
+      for (const linhas of dividirCenarioCompletoPorMaxE(titulo, corpo)) {
+        out.push(...linhas);
+        out.push('');
+      }
     }
   }
 
@@ -104,38 +158,47 @@ function buildStructuredBdd(title, ctx) {
         out.push('');
       }
     }
-    if (ctx.resultadoObtido && ctx.resultadoEsperado) {
+    if (blocosDev.length === 0 && ctx.resultadoObtido && ctx.resultadoEsperado) {
       const { entaoVerificavel, resolverPassosReproducao } = require('../utils/bdd-gherkin');
+      const { quandoSubstituto, entaoEhVago } = require('../utils/bdd-rigor');
       const titulo = `${nomeFuncionalidadeCurto(nomeFuncionalidade)} — defeito observado`;
       const obtido = entaoVerificavel(ctx.resultadoObtido);
       const esperado = entaoVerificavel(ctx.resultadoEsperado);
-      const entao = obtido ? `  Então ${obtido}` : '  Então o defeito descrito é reproduzido';
-      const mas = esperado ? `    Mas o esperado era ${esperado}` : null;
-      const chunks = passosParaStepsGherkinComContinuacao(resolverPassosReproducao(ctx));
-      const partes =
-        chunks.length > 0
-          ? chunks.map((passos, idx) => {
-              const suffix = idx > 0 ? ` — continuação` : '';
-              const linhas = [
-                `Cenário: ${titulo}${suffix}`,
-                ...montarDadosIniciais(ctx),
-                ...passos,
-              ];
-              if (idx === chunks.length - 1) {
-                linhas.push(entao);
-                if (mas) linhas.push(mas);
-              }
-              return linhas;
-            })
-          : dividirCenarioCompletoPorMaxE(titulo, [
-              ...montarDadosIniciais(ctx),
-              '  Quando o usuário reproduz o fluxo do chamado',
-              entao,
-              ...(mas ? [mas] : []),
-            ]);
-      for (const linhas of partes) {
-        out.push(...linhas);
-        out.push('');
+      if (!obtido || entaoEhVago(obtido)) {
+        /* sem Então verificável do obtido — não inventa cenário de defeito */
+      } else {
+        const entao = `  Então ${obtido}`;
+        const mas =
+          esperado && !entaoEhVago(esperado) ? `    Mas o esperado era ${esperado}` : null;
+        const chunks = passosParaStepsGherkinComContinuacao(resolverPassosReproducao(ctx));
+        const quandoFb = quandoSubstituto(ctx);
+        const partes =
+          chunks.length > 0
+            ? chunks.map((passos, idx) => {
+                const suffix = idx > 0 ? ` — continuação` : '';
+                const linhas = [
+                  `Cenário: ${titulo}${suffix}`,
+                  ...montarDadosIniciais(ctx),
+                  ...passos,
+                ];
+                if (idx === chunks.length - 1) {
+                  linhas.push(entao);
+                  if (mas) linhas.push(mas);
+                }
+                return linhas;
+              })
+            : quandoFb
+              ? dividirCenarioCompletoPorMaxE(titulo, [
+                  ...montarDadosIniciais(ctx),
+                  quandoFb,
+                  entao,
+                  ...(mas ? [mas] : []),
+                ])
+              : [];
+        for (const linhas of partes) {
+          out.push(...linhas);
+          out.push('');
+        }
       }
     }
   }
@@ -148,7 +211,9 @@ function buildStructuredBdd(title, ctx) {
 
 function finalizarFeatureBdd(feature, ctx, meta = {}) {
   if (!feature) return feature;
-  return planificarFeatureBdd(feature, ctx, meta);
+  const { rigorizarFeatureBdd } = require('../utils/bdd-rigor');
+  const rigor = rigorizarFeatureBdd(feature, ctx);
+  return planificarFeatureBdd(rigor, ctx, meta);
 }
 
 function montarInputLlm(title, ctx) {
@@ -188,7 +253,11 @@ function montarInputLlm(title, ctx) {
     '- NÃO repita cenários com mesmo fluxo/Então; una redundâncias.',
     '- ORDEM de saída: (1) reprodução do defeito se houver, (2) cenários Dev na ordem, (3) lacunas do chamado, (4) cobertura extra por risco.',
     '- Lacunas: inclua cenário só se validação do chamado/evidência não estiver coberta.',
-    '- Converta cada cenário Dev; extras só quando agregarem risco real ao chamado.'
+    '- Converta cada cenário Dev; extras só quando agregarem risco real ao chamado.',
+    '- PROIBIDO inventar: telas, botões, mensagens ou dados que não estejam no chamado/Dev/evidências.',
+    '- PROIBIDO: "sistema em operação", "fluxo principal do chamado", "alinhado à regra de negócio", colar texto do Dev em linha E.',
+    '- Cada Então = frase do resultado esperado/obtido ou do Então do bloco Dev (paráfrase curta).',
+    '- Cada Quando/E = ação concreta dos passos NGF ou do Dev (abrir laudário, comparar protocolo, etc.).'
   );
 
   if (ctx.resumoObjetivo) partes.push('\nResumo objetivo do teste:\n' + ctx.resumoObjetivo);
@@ -229,7 +298,7 @@ function montarInputLlm(title, ctx) {
 }
 
 const PASSOS_BLOQUEADOS_LLM =
-  /passos?\s+para\s+reproduzir|cen[aá]rio\s+principal\s+foi\s+executado|fluxo\s+[eé]\s+conclu[ií]do|sistema\s+est[aá]\s+em\s+opera[çc][aã]o/i;
+  /passos?\s+para\s+reproduzir|cen[aá]rio\s+principal\s+foi\s+executado|fluxo\s+[eé]\s+conclu[ií]do|sistema\s+est[aá]\s+em\s+opera[çc][aã]o|executa\s+o\s+fluxo\s+principal|alinhad[oa]\s+[àa]\s+regra\s+de\s+neg[oó]cio|time\s+analisou|melhoria\s+for\s+implementada|cen[aá]rio\s+do\s+dev\s+prev[eê]/i;
 
 function bddLlmOutputValido(texto) {
   if (!texto || typeof texto !== 'string') return false;
@@ -310,10 +379,12 @@ async function generateBDD(title, item) {
 
   const structured = () => buildStructuredBdd(title, ctx);
 
+  const forceLlm = process.env.BDD_ASSERTIVE_LLM === '1';
   const preferStructured =
     process.env.BDD_PREFER_STRUCTURED === '1' ||
+    (!forceLlm && process.env.BDD_ASSERTIVE_MODE !== '0') ||
     (blocosDev.length > 0 && !isLlmEnabled()) ||
-    (blocosDev.length > 0 && process.env.BDD_ASSERTIVE_LLM !== '1');
+    (blocosDev.length > 0 && !forceLlm);
 
   if (preferStructured && blocosDev.length > 0) {
     return structured();

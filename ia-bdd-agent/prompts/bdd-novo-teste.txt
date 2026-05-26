@@ -5,13 +5,13 @@ Foco: cobrir o fluxo feliz descrito no chamado + pontos de verificação explíc
 {{VOCAB}}
 
 DIRETRIZES
-- Funcionalidade: nome do módulo + tema curto.
-- Pelo menos 1 cenário "validação principal" com todos os passos de reprodução detalhados.
-- Se o Dev já listou cenários, replique cada um como Cenário QA com nome derivado do título Dev.
-- Dado obrigatório: "Dado que o usuário acessa o ambiente [detectado no título/Dev]".
-- Além dos cenários Dev, inclua 1–3 cenários extras de cobertura (smoke, negativo, integração).
-- Então: alinhado ao resultado esperado, em linguagem de checklist ("é exibido", "permanece", "é igual a").
-- Só inclua cenário negativo ou edge se o chamado mencionar.
+- Funcionalidade: módulo + tema curto (até 12 palavras).
+- 1 cenário "validação principal" OU um cenário por bloco Dev (nome = título do Dev).
+- Dado obrigatório: "Dado que o usuário acessa o ambiente [detectado]".
+- Passos só do chamado: passos NGF, Dev e evidências — nunca inventar tela ou botão.
+- Então = frase observável do resultado esperado ou do Então do Dev ("nenhuma mensagem de erro", "protocolo é igual", etc.).
+- No máximo 1 cenário extra se o chamado citar integração worklist×portal, laudário, validação de formulário.
+- Proibido: sistema em operação, fluxo principal do chamado, alinhado à regra de negócio, colar texto do Dev em E.
 
 FORMATO: somente Gherkin (Funcionalidade, Cenário, Dado, Quando, E, Então).
 
