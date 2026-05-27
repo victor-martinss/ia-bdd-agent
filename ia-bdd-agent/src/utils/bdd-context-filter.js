@@ -72,6 +72,7 @@ function resumirEvidencias(texto, maxChars = 520) {
 function passosObjetivosDoContexto(ctx) {
   const fontes = [
     ctx.passosFiltrados || ctx.passos,
+    ctx.comentariosTarefaFiltrado || ctx.comentariosTarefa,
     ...(ctx.passosEvidencia || []),
   ].filter(Boolean);
 
@@ -102,6 +103,7 @@ function extrairPalavrasChave(ctx) {
     ctx.titulo,
     ctx.descricaoFiltrada || ctx.descricao,
     ctx.passosFiltrados || ctx.passos,
+    ctx.comentariosTarefaFiltrado || ctx.comentariosTarefa,
     ctx.resultadoEsperado,
     ctx.resultadoObtido,
     ctx.cenariosTesteDev,
@@ -163,10 +165,12 @@ function aplicarFiltroContexto(ctx) {
 
   const descricaoFrases = frasesRelevantes(ctx.descricao, 5);
   const triagemFrases = frasesRelevantes(ctx.observacoesTriagem, 3);
+  const comentarioFrases = frasesRelevantes(ctx.comentariosTarefa, 6);
 
   const passosEvidencia = Array.isArray(ctx.passosEvidencia) ? ctx.passosEvidencia : [];
   const passosFiltrados = mergePassosFontes(
     ctx.passos,
+    comentarioFrases.join('\n'),
     passosEvidencia.join('\n'),
     descricaoFrases.length && !limparTexto(ctx.passos) ? descricaoFrases.join('\n') : ''
   );
@@ -175,6 +179,7 @@ function aplicarFiltroContexto(ctx) {
     ...ctx,
     descricaoFiltrada: descricaoFrases.join(' ').trim() || truncarSemCortar(stripTextoAdministrativo(ctx.descricao || ''), 320),
     passosFiltrados: passosFiltrados || ctx.passos || '',
+    comentariosTarefaFiltrado: comentarioFrases.join(' ').trim(),
     evidenceResumoFiltrado: resumirEvidencias(ctx.evidenceResumo),
     observacoesTriagemFiltrada: triagemFrases.join(' ').trim() || truncarSemCortar(ctx.observacoesTriagem || '', 240),
     passosEvidencia,

@@ -5,7 +5,6 @@ const { detectAmbiente, onlyTitleAndDevSources } = require('../utils/bdd-ambient
 const { enrichCtxWithEvidence, aplicarFiltroContexto } = require('../utils/bdd-context');
 const { formatarValidacoesParaPrompt } = require('../utils/bdd-validacoes');
 const { planificarFeatureBdd } = require('../utils/bdd-scenario-planner');
-const { resumoHistoricoParaBdd } = require('../services/crm-qa-history');
 const {
   gerarCenariosCoberturaExtra,
   cabecalhoCobertura,
@@ -13,11 +12,8 @@ const {
 } = require('../utils/bdd-coverage-extra');
 const {
   passosParaStepsGherkin,
-  devCenariosParaPassosE,
   montarDadosIniciais,
   ctxTemCamposEstruturados,
-  passosAPartirDoTitulo,
-  entaoAPartirDoTitulo,
   sanitizarFeatureBdd,
   parseCenariosDevBlocos,
   cenariosQaAPartirDoDev,
@@ -25,7 +21,6 @@ const {
   dividirCenarioCompletoPorMaxE,
   nomeFuncionalidadeCurto,
   limparTexto,
-  entaoDoContexto,
 } = require('../utils/bdd-gherkin');
 
 /** @deprecated use enrichCtxWithEvidence — mantido para testes/scripts */
@@ -40,11 +35,11 @@ function ctxTemDadosParaBdd(ctx) {
   }
   return (
     ctxTemCamposEstruturados(ctx) ||
-    !!limparTexto(ctx.titulo) ||
     !!limparTexto(ctx.cenariosTesteDev) ||
     !!limparTexto(ctx.descricao) ||
     !!limparTexto(ctx.passos) ||
-    !!limparTexto(ctx.evidenceResumo)
+    !!limparTexto(ctx.evidenceResumo) ||
+    !!limparTexto(ctx.comentariosTarefa)
   );
 }
 
@@ -115,26 +110,6 @@ function buildStructuredBdd(title, ctx) {
     }
     for (const bloco of blocosDev) {
       for (const linhas of cenariosQaAPartirDoDev(bloco, ctx, nomeFuncionalidade)) {
-        out.push(...linhas);
-        out.push('');
-      }
-    }
-  } else if (limparTexto(ctx.titulo)) {
-    const partes = String(nomeFuncionalidade).split(/\s*—\s*/);
-    const foco =
-      partes.length > 1 ? partes.slice(1).join(' — ') : nomeFuncionalidade;
-    const titulo = `${foco} — validação principal`;
-    const corpo = [...montarDadosIniciais(ctx)];
-    if (limparTexto(ctx.cenariosTesteDev)) {
-      corpo.push(...devCenariosParaPassosE(ctx.cenariosTesteDev));
-    }
-    const passosTit = passosAPartirDoTitulo(nomeFuncionalidade);
-    if (passosTit.length) corpo.push(...passosTit);
-    const entaoTit =
-      entaoAPartirDoTitulo(nomeFuncionalidade) || entaoDoContexto(ctx, '');
-    if (entaoTit) corpo.push(entaoTit);
-    if (corpo.length >= 3) {
-      for (const linhas of dividirCenarioCompletoPorMaxE(titulo, corpo)) {
         out.push(...linhas);
         out.push('');
       }
@@ -331,18 +306,8 @@ async function prepararCtxBdd(title, item) {
   const fullCtx = extractTaskContext(item);
   let ctx = await enrichCtxWithEvidence(fullCtx, item, title);
 
-  try {
-    const qaHistorico = await resumoHistoricoParaBdd(item);
-    ctx.qaHistorico = qaHistorico;
-    if (qaHistorico.observacoesTriagem && !ctx.observacoesTriagem) {
-      ctx.observacoesTriagem = qaHistorico.observacoesTriagem;
-    }
-  } catch (e) {
-    if (process.env.DEBUG_BITRIX === '1') {
-      console.warn('[BDD] histórico QA:', e.message || e);
-    }
-    ctx.qaHistorico = { isRetornoQa: false, reason: '' };
-  }
+  // Não usa histórico antigo de QA para evitar contaminação de contexto.
+  ctx.qaHistorico = { isRetornoQa: false, reason: '' };
 
   ctx = aplicarFiltroContexto(ctx);
   return ctx;
@@ -352,7 +317,7 @@ async function generateBDD(title, item) {
   const ctx = await prepararCtxBdd(title, item);
 
   if (!ctxTemDadosParaBdd(ctx)) {
-    return '# Não foi possível gerar BDD (sem título nem Cenários de Teste Dev no CRM)\n';
+    return '# Não foi possível gerar BDD (faltam descrição, comentários, evidências ou Cenários de Teste Dev no CRM)\n';
   }
 
   const fontes =
@@ -394,13 +359,13 @@ async function generateBDD(title, item) {
     return structured();
   }
 
-  const cardSoTitulo =
+  const cardSemContextoExecutavel =
     blocosDev.length === 0 &&
     !ctxTemCamposEstruturados(ctx) &&
-    limparTexto(ctx.titulo || title);
+    !limparTexto(ctx.comentariosTarefa);
 
-  if (cardSoTitulo) {
-    return structured();
+  if (cardSemContextoExecutavel) {
+    return '# Não foi possível gerar BDD executável (somente título no card; preencha descrição/comentários/evidências)\n';
   }
 
   if (!isLlmEnabled()) {

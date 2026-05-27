@@ -23,6 +23,33 @@ function flattenItem(item) {
 }
 
 /**
+ * Comentários atuais da tarefa (não histórico de QA).
+ * Busca campos comuns e UFs com "coment" para enriquecer contexto do BDD.
+ */
+function textoComentariosTarefaFromItem(item) {
+  if (!item || typeof item !== 'object') return '';
+  const candidatos = [
+    'comments',
+    'COMMENTS',
+    'detailText',
+    'DETAIL_TEXT',
+    'description',
+    'DESCRIPTION',
+  ];
+  for (const k of candidatos) {
+    if (isMeaningful(item[k])) return texto(item[k]);
+  }
+  for (const k of Object.keys(item)) {
+    if (!/^ufCrm\d+/i.test(k)) continue;
+    const lower = k.toLowerCase();
+    if (lower.includes('coment') && isMeaningful(item[k])) {
+      return texto(item[k]);
+    }
+  }
+  return '';
+}
+
+/**
  * Campo "Cenários de Teste (Dev)" no SPA — REST costuma ser ufCrm* com cenario+teste+dev.
  * Override: BITRIX_UF_CENARIOS_TESTE_DEV=códigoDoCampo
  */
@@ -99,6 +126,8 @@ function extractTaskContext(raw) {
       'ObservacoesDaTriagem',
     ]),
 
+    comentariosTarefa: textoComentariosTarefaFromItem(item),
+
     cenariosTesteDev: (() => {
       const v = textoCenariosTesteDevFromItem(item);
       return isMeaningful(v) ? v : '';
@@ -117,6 +146,7 @@ function buildNarrative(ctx) {
   if (ctx.observacoes) blocos.push(`Observações:\n${ctx.observacoes}`);
   if (ctx.observacoesHu) blocos.push(`Observações para geração HU:\n${ctx.observacoesHu}`);
   if (ctx.observacoesTriagem) blocos.push(`Observações triagem QA:\n${ctx.observacoesTriagem}`);
+  if (ctx.comentariosTarefa) blocos.push(`Comentários da tarefa:\n${ctx.comentariosTarefa}`);
   if (ctx.cenariosTesteDev) {
     blocos.push(`Cenários de Teste (Dev):\n${ctx.cenariosTesteDev}`);
   }
