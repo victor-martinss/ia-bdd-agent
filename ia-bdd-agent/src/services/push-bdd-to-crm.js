@@ -5,8 +5,9 @@ const {
   defaultAppendMarker,
   mergeFeatureEnabled,
   crmFieldHasMergeMarker,
-  mergeBddBelowMarker,
+  appendOrMergeBddInCrmField,
 } = require('../utils/bdd-crm-merge');
+const { filterFieldKeysForEntityType } = require('../utils/crm-uf-by-entity');
 
 /**
  * Heurística: chaves UF do item que costumam ser o destino do BDD
@@ -79,18 +80,30 @@ function envFieldList() {
  * @param {Record<string, unknown> | null | undefined} detail
  */
 function fieldKeyCandidates(detail) {
-  const fromEnv = envFieldList();
-  if (fromEnv.length) return [...new Set(fromEnv)];
+  const flat = flattenItem(detail || {});
+  const { key: filledKey } = qaBddFieldTextFromFlat(flat);
+  const entityTypeId =
+    flat._entityTypeId || flat.entityTypeId || detail?._entityTypeId || detail?.entityTypeId;
 
-  const discovered = discoverQaBddFieldKeys(detail);
-  if (discovered.length) return discovered;
+  const base = (() => {
+    const fromEnv = envFieldList();
+    if (fromEnv.length) return [...new Set(fromEnv)];
+    const discovered = discoverQaBddFieldKeys(detail);
+    if (discovered.length) return discovered;
+    return [
+      'ufCrm100TesteQa',
+      'ufCrm100CenariosQa',
+      'ufCrm94TesteQa',
+      'ufCrm94CenariosQa',
+    ];
+  })();
 
-  return [
-    'ufCrm100TesteQa',
-    'ufCrm100CenariosQa',
-    'ufCrm94TesteQa',
-    'ufCrm94CenariosQa',
-  ];
+  const scoped = filterFieldKeysForEntityType(base, entityTypeId);
+
+  if (filledKey && scoped.includes(filledKey)) {
+    return [filledKey, ...scoped.filter((k) => k !== filledKey)];
+  }
+  return scoped;
 }
 
 function stripHtmlNoiseForBdd(s) {
@@ -184,6 +197,7 @@ function qaBddFieldTextFromFlat(flat) {
  */
 function bddQaCrmPushWouldOverwriteWithoutMerge(detail) {
   if (process.env.BITRIX_SKIP_BDD_IF_QA_FILLED === '0') return false;
+  if (mergeFeatureEnabled()) return false;
   return classifyBddQaItemAction(detail).action === 'skip_filled';
 }
 
@@ -213,19 +227,15 @@ function classifyBddQaItemAction(detail) {
     };
   }
 
-  if (mergeFeatureEnabled() && crmFieldHasMergeMarker(text, defaultAppendMarker())) {
+  if (mergeFeatureEnabled()) {
+    const marker = defaultAppendMarker();
+    const hasMarker = crmFieldHasMergeMarker(text, marker);
     return {
       action: 'merge',
       fieldKey,
-      reason: 'atualizar bloco IA abaixo do marcador (aprovados preservados)',
-    };
-  }
-
-  if (mergeFeatureEnabled()) {
-    return {
-      action: 'skip_filled',
-      fieldKey,
-      reason: `cenários já preenchidos em ${fieldKey || 'ufCrm94CenariosQa'} — inclua a linha ${defaultAppendMarker()} após o bloco aprovado para permitir atualização só do bloco IA`,
+      reason: hasMarker
+        ? 'atualizar bloco IA abaixo do marcador (aprovados preservados)'
+        : `cenários em ${fieldKey || 'Cenários QA'} — preservar conteúdo e gravar bloco IA (marcador ${marker})`,
     };
   }
 
@@ -301,20 +311,12 @@ async function pushBddToCrmCenariosQa(taskId, bdd, options = {}) {
   let valor = bdd.trim();
   const flat = flattenItem(detail || {});
   const { text: existingQaText } = qaBddFieldTextFromFlat(flat);
-  const marker = defaultAppendMarker();
-  if (
-    mergeFeatureEnabled() &&
-    existingQaText &&
-    crmFieldHasMergeMarker(existingQaText, marker)
-  ) {
-    const merged = mergeBddBelowMarker(existingQaText, valor, marker);
-    if (merged) {
-      valor = merged;
-      if (process.env.DEBUG_BITRIX === '1' && !quiet) {
-        console.log(
-          `[CRM] item ${taskId} — mesclando BDD abaixo do marcador (cenários aprovados preservados)`
-        );
-      }
+  if (mergeFeatureEnabled() && existingQaText) {
+    valor = appendOrMergeBddInCrmField(existingQaText, valor, defaultAppendMarker());
+    if (process.env.DEBUG_BITRIX === '1' && !quiet) {
+      console.log(
+        `[CRM] item ${taskId} — mesclando BDD no campo QA (conteúdo manual preservado)`
+      );
     }
   }
 

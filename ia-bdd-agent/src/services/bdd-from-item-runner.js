@@ -33,9 +33,14 @@ async function runBddForSingleCrmItem(packageRoot, opts) {
   }
 
   try {
+    const et =
+      entityTypeId != null && Number.isFinite(Number(entityTypeId))
+        ? Number(entityTypeId)
+        : null;
     const detail = await getTaskDetail(numId, {
-      entityTypeId: entityTypeId ?? undefined,
+      entityTypeId: et ?? undefined,
     });
+    if (et) detail._entityTypeId = et;
     const title =
       detail.title ||
       detail.TITLE ||
@@ -44,7 +49,14 @@ async function runBddForSingleCrmItem(packageRoot, opts) {
       `Item ${numId}`;
 
     return await runBitrixBddCycle(pkg, {
-      tasks: [{ id: numId, title }],
+      tasks: [
+        {
+          id: numId,
+          title,
+          _entityTypeId: et || detail._entityTypeId,
+          _prefetchedDetail: detail,
+        },
+      ],
       quiet,
     });
   } finally {

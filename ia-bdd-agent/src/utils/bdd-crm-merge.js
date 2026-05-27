@@ -75,10 +75,35 @@ function mergeBddBelowMarker(existingRaw, novaFeature, markerLine) {
   return parts.join('\n').trimEnd();
 }
 
+/**
+ * Preserva texto já no CRM e grava/atualiza só o bloco IA (com marcador).
+ * @param {string} existingRaw
+ * @param {string} novaFeature
+ * @param {string} [markerLine]
+ * @returns {string}
+ */
+function appendOrMergeBddInCrmField(existingRaw, novaFeature, markerLine) {
+  const existing = normalizeNewlines(existingRaw).trim();
+  const body = normalizeNewlines(novaFeature).trim();
+  const marker = (markerLine || defaultAppendMarker()).trim();
+  if (!existing) return body;
+  if (!body) return existing;
+  if (!marker) return `${existing}\n\n${IA_SUGGESTED_HEADER}\n\n${body}`.trimEnd();
+
+  if (crmFieldHasMergeMarker(existing, marker)) {
+    const merged = mergeBddBelowMarker(existing, body, marker);
+    if (merged) return merged;
+  }
+
+  const parts = [existing, '', marker, '', IA_SUGGESTED_HEADER, '', body];
+  return parts.join('\n').trimEnd();
+}
+
 module.exports = {
   defaultAppendMarker,
   mergeFeatureEnabled,
   crmFieldHasMergeMarker,
   mergeBddBelowMarker,
+  appendOrMergeBddInCrmField,
   IA_SUGGESTED_HEADER,
 };

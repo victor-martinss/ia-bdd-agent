@@ -15,9 +15,11 @@ const {
   printNewInQueueAlert,
   printGeneratedSuccess,
   printGeneratedError,
+  printCrmNotUpdated,
   printScanProgress,
   printCycleSummary,
 } = require('./src/utils/poll-visual');
+const { sleep } = require('./src/utils/bitrix-http-retry');
 const {
   loadPollState,
   savePollState,
@@ -67,6 +69,11 @@ function taskQueueKey(task) {
 
 function useLegacyProcessedIdsGate() {
   return process.env.BDD_POLL_LEGACY_PROCESSED_IDS === '1';
+}
+
+function pollItemDelayMs() {
+  const n = Number.parseInt(process.env.BDD_POLL_ITEM_DELAY_MS || '450', 10);
+  return Number.isFinite(n) && n >= 0 ? n : 450;
 }
 
 function queueDelta(currentTasks, prevQueueIds, hasBaseline) {
@@ -187,17 +194,27 @@ async function scanAndProcessQaQueue(tasks, forceSet, newInQueueSet, onProgress,
         ],
         quiet: false,
       });
-      if (result.processed > 0 && result.crm.ok > 0) {
+      if (result.crm.ok > 0) {
         generated += 1;
-        printGeneratedSuccess(row, { ok: true, field: process.env.BITRIX_UF_BDD_FIELD });
-      } else if (result.processed > 0) {
-        generated += 1;
-        printGeneratedSuccess(row, {});
-      } else if (result.crm.skipped) {
-        skippedFilled += 1;
+        printGeneratedSuccess(row, { field: result.crm.lastField });
+      } else if (result.crm.failed > 0) {
+        printGeneratedError(
+          id,
+          'Falha ao gravar cenários no CRM (verifique campo UF e entityTypeId do card)'
+        );
+      } else if (result.processed > 0 || result.crm.skipped > 0) {
+        printCrmNotUpdated(
+          row,
+          'Card sem descrição/Dev/evidências — BDD não enviado ao campo Cenários QA'
+        );
       }
     } catch (e) {
       printGeneratedError(id, e.message || String(e));
+    }
+
+    const delay = pollItemDelayMs();
+    if (delay > 0 && i < tasks.length - 1) {
+      await sleep(delay);
     }
   }
 

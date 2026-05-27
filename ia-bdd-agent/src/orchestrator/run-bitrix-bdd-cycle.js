@@ -3,6 +3,7 @@ const { getTasks, getTaskDetail } = require('../services/bitrix.service');
 const {
   pushBddToCrmCenariosQa,
   classifyBddQaItemActionAsync,
+  bddPodePublicarNoCrm,
 } = require('../services/push-bdd-to-crm');
 const { pushBddToLinkedBitrixTasks } = require('../services/push-bdd-to-linked-tasks');
 const { pushBddToQaLinkedCrmItems } = require('../services/push-bdd-to-qa-linked-crm');
@@ -46,7 +47,7 @@ async function runBitrixBddCycle(packageRoot, options = {}) {
   }
 
   let processed = 0;
-  const crm = { ok: 0, skipped: 0, failed: 0 };
+  const crm = { ok: 0, skipped: 0, failed: 0, lastField: null };
   const linkedTasks = { updated: 0, failed: 0 };
   for (const task of tasks) {
     try {
@@ -113,20 +114,42 @@ async function runBitrixBddCycle(packageRoot, options = {}) {
         console.log(`📄 BDD completo (arquivo): ${file}\n`);
       }
 
-      const etId = itemEtId || (await getEntityTypeId());
+      const etId =
+        itemEtId ||
+        (detail && detail._entityTypeId) ||
+        (await getEntityTypeId());
       const stageId = detail && (detail.stageId || detail.STAGE_ID);
       const inQa = stageId ? await isQaStageId(String(stageId), etId) : true;
       const inDev = stageId ? await isDevStageId(String(stageId), etId) : false;
+      const publicavel = bddPodePublicarNoCrm(bdd);
 
-      if (inQa || process.env.BITRIX_PUSH_BDD_ON_DEV_CARD === '1') {
+      if (!publicavel && !quiet) {
+        console.warn(
+          `[CRM] item ${task.id}: cenários não gravados — card sem contexto suficiente (descrição, Dev, evidências ou comentários).`
+        );
+      }
+
+      if (
+        publicavel &&
+        (inQa || process.env.BITRIX_PUSH_BDD_ON_DEV_CARD === '1')
+      ) {
         const crmResult = await pushBddToCrmCenariosQa(task.id, bdd, {
           quiet,
           detail,
           entityTypeId: etId,
         });
-        if (crmResult.ok) crm.ok += 1;
-        else if (crmResult.skipped) crm.skipped += 1;
+        if (crmResult.ok) {
+          crm.ok += 1;
+          crm.lastField = crmResult.field || crm.lastField;
+        } else if (crmResult.skipped) crm.skipped += 1;
         else crm.failed += 1;
+      } else if (!publicavel && inQa) {
+        crm.skipped += 1;
+      } else if (publicavel && !inQa && !inDev && !quiet) {
+        console.warn(
+          `[CRM] item ${task.id}: estágio "${stageId || '?'}" não reconhecido como QA (SPA ${etId}) — cenários não gravados. Confira _entityTypeId do card.`
+        );
+        crm.skipped += 1;
       } else if (!quiet && inDev) {
         console.log(
           `[CRM] item ${task.id}: coluna de desenvolvimento — cenários não gravados neste card (apenas em cards QA / BITRIX_UF_BDD_FIELD).`
@@ -183,7 +206,7 @@ async function runBitrixBddCycle(packageRoot, options = {}) {
         console.log(bdd);
         console.log('');
       }
-      processed += 1;
+      if (publicavel) processed += 1;
     } catch (err) {
       console.error(`Erro na task ${task.id}:`, err.message);
     }

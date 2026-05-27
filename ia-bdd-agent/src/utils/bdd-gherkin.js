@@ -1127,6 +1127,22 @@ function cenarioPrincipalNgf(ctx, nomeFuncionalidade) {
 }
 
 /**
+ * Cenário mínimo a partir do título quando não há Dev/NGF (smoke).
+ */
+function cenariosSmokeAPartirDoTitulo(ctx, nomeFuncionalidade) {
+  const tituloCard = limparTexto(ctx.titulo) || limparTexto(nomeFuncionalidade);
+  if (!tituloCard) return [];
+  const nomeCurto = nomeFuncionalidadeCurto(nomeFuncionalidade);
+  const tituloCenario = `${nomeCurto} — validação pelo título do chamado`;
+  const entao = entaoAPartirDoTitulo(tituloCard);
+  const passos = passosAPartirDoTitulo(tituloCard);
+  if (!entao || !passos.length) return [];
+  return [
+    [`Cenário: ${tituloCenario}`, ...montarDadosIniciais(ctx), ...passos, entao],
+  ];
+}
+
+/**
  * Converte bloco "Cenários de Teste (Dev)" em passos E resumidos.
  */
 function devCenariosParaPassosE(texto) {
@@ -1377,6 +1393,7 @@ module.exports = {
   cenariosQaAPartirDoDev,
   cenarioPrincipalNgf,
   cenariosPrincipalNgf,
+  cenariosSmokeAPartirDoTitulo,
   entaoDoContexto,
   devCenariosParaPassosE,
   montarDadosIniciais,

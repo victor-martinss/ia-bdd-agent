@@ -4,10 +4,9 @@ const { getEntityTypeId, getTaskDetail } = require('./bitrix.service');
 const {
   pushBddToCrmCenariosQa,
   bddPodePublicarNoCrm,
-  bddQaStorageFieldAlreadyFilled,
+  classifyBddQaItemAction,
   bddQaStorageFirstFilledFieldKey,
 } = require('./push-bdd-to-crm');
-const { itemTemHistoricoQa } = require('./crm-qa-history');
 const {
   resolveQaStageIds,
   resolveDevStageIds,
@@ -154,22 +153,18 @@ async function pushBddToQaLinkedCrmItems(sourceItemId, bdd, options = {}) {
 
   for (const row of qaItems) {
     const childDetail = await getTaskDetail(row.id);
-    const hist = await itemTemHistoricoQa(childDetail || {});
-    if (hist.has) {
+    const classification = classifyBddQaItemAction(childDetail || {});
+    if (
+      classification.action === 'skip_filled' ||
+      classification.action === 'skip_qa_history'
+    ) {
       skippedAlreadyFilled += 1;
       if (!quiet) {
+        const fk =
+          classification.fieldKey ||
+          bddQaStorageFirstFilledFieldKey(childDetail || {});
         console.log(
-          `📎 Card QA ${row.id} (${row.title || 'sem título'}) — histórico QA (retorno); não gera cenários. ${hist.reason}`
-        );
-      }
-      continue;
-    }
-    if (bddQaStorageFieldAlreadyFilled(childDetail || {})) {
-      skippedAlreadyFilled += 1;
-      if (!quiet) {
-        const fk = bddQaStorageFirstFilledFieldKey(childDetail || {});
-        console.log(
-          `📎 Card QA ${row.id} (${row.title || 'sem título'}) — campo de cenários QA${fk ? ` (${fk})` : ''} já preenchido (sem zona de atualização IA); não altera cenários já aprovados.`
+          `📎 Card QA ${row.id} (${row.title || 'sem título'}) — ${classification.reason}${fk ? ` (${fk})` : ''}`
         );
       }
       continue;

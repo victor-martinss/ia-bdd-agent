@@ -1,5 +1,9 @@
 require('../../load-env');
 const axios = require('axios');
+const {
+  withBitrixRetry,
+  isRetryableHttpStatus,
+} = require('../utils/bitrix-http-retry');
 
 const BASE_URL = process.env.BITRIX_WEBHOOK;
 
@@ -464,7 +468,7 @@ function flattenFilterForGet(filter) {
  * @param {number} itemId
  * @returns {Promise<{ item: Record<string, unknown>, entityTypeId: number } | null>}
  */
-async function fetchCrmItemByEntityType(entityTypeId, itemId) {
+async function fetchCrmItemByEntityTypeOnce(entityTypeId, itemId) {
   const url = `${BASE_URL}/crm.item.get`;
   const body = { entityTypeId, id: itemId };
 
@@ -488,9 +492,11 @@ async function fetchCrmItemByEntityType(entityTypeId, itemId) {
 
   if (response.status >= 400 || msg) {
     if (response.data && response.data.error === 'NOT_FOUND') return null;
-    throw new Error(
+    const httpErr = new Error(
       msg || `crm.item.get HTTP ${response.status} (entityTypeId=${entityTypeId}, id=${itemId})`
     );
+    httpErr.response = response;
+    throw httpErr;
   }
 
   const item = response.data && response.data.result && response.data.result.item;
@@ -498,9 +504,16 @@ async function fetchCrmItemByEntityType(entityTypeId, itemId) {
   return { item, entityTypeId };
 }
 
+async function fetchCrmItemByEntityType(entityTypeId, itemId) {
+  const label = `crm.item.get ${itemId} (et=${entityTypeId})`;
+  return withBitrixRetry(label, () =>
+    fetchCrmItemByEntityTypeOnce(entityTypeId, itemId)
+  );
+}
+
 /**
  * @param {number|string} id
- * @param {{ entityTypeId?: number }} [options]
+ * @param {{ entityTypeId?: number, noGlobalOverride?: boolean }} [options]
  * @returns {Promise<Record<string, unknown>>}
  */
 async function getTaskDetail(id, options = {}) {
@@ -527,7 +540,9 @@ async function getTaskDetail(id, options = {}) {
         console.log(
           `[Bitrix] item ${itemId} encontrado em entityTypeId=${etId} (não estava em ${primaryEt})`
         );
-        setRuntimeEntityTypeIdOverride(etId);
+        if (!options.noGlobalOverride) {
+          setRuntimeEntityTypeIdOverride(etId);
+        }
       }
       return found.item;
     }
@@ -554,11 +569,15 @@ async function updateCrmItemFieldsJson(id, fields, entityTypeId) {
     entityTypeId != null && Number.isFinite(Number(entityTypeId))
       ? Number(entityTypeId)
       : await getEntityTypeId();
-  return axios.post(url, {
-    entityTypeId: etId,
-    id,
-    fields,
-  });
+  return axios.post(
+    url,
+    {
+      entityTypeId: etId,
+      id,
+      fields,
+    },
+    { validateStatus: (s) => s >= 200 && s < 600 }
+  );
 }
 
 async function updateCrmItemFieldsForm(id, fields, entityTypeId) {
@@ -578,6 +597,7 @@ async function updateCrmItemFieldsForm(id, fields, entityTypeId) {
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     maxBodyLength: Infinity,
     maxContentLength: Infinity,
+    validateStatus: (s) => s >= 200 && s < 600,
   });
 }
 
@@ -590,13 +610,7 @@ function logRestDebug(label, response) {
   );
 }
 
-async function updateCrmItemFields(id, fields, options = {}) {
-  if (!BASE_URL) {
-    throw new Error('BITRIX_WEBHOOK não definido');
-  }
-
-  const etId = options.entityTypeId;
-
+async function updateCrmItemFieldsOnce(id, fields, etId) {
   let response = await updateCrmItemFieldsJson(id, fields, etId);
   logRestDebug('crm.item.update JSON', response);
 
@@ -607,12 +621,30 @@ async function updateCrmItemFields(id, fields, options = {}) {
     msg = restErrorMessage(response.data);
   }
 
+  if (response.status >= 400 && isRetryableHttpStatus(response.status)) {
+    const httpErr = new Error(
+      msg || `crm.item.update HTTP ${response.status}`
+    );
+    httpErr.response = response;
+    throw httpErr;
+  }
+
   if (msg) throw new Error(msg);
   const { result } = response.data;
   if (result === false) {
     throw new Error('crm.item.update retornou result=false');
   }
   return result;
+}
+
+async function updateCrmItemFields(id, fields, options = {}) {
+  if (!BASE_URL) {
+    throw new Error('BITRIX_WEBHOOK não definido');
+  }
+
+  const etId = options.entityTypeId;
+  const label = `crm.item.update ${id} (et=${etId || '?'})`;
+  return withBitrixRetry(label, () => updateCrmItemFieldsOnce(id, fields, etId));
 }
 
 /**

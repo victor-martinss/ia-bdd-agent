@@ -3,6 +3,7 @@ const { buildBddPrompt } = require('../utils/bdd-prompts');
 const { extractTaskContext } = require('./parser');
 const { detectAmbiente, onlyTitleAndDevSources } = require('../utils/bdd-ambiente');
 const { enrichCtxWithEvidence, aplicarFiltroContexto } = require('../utils/bdd-context');
+const { enrichCtxFromLinkedCrm } = require('../utils/bdd-linked-context');
 const { formatarValidacoesParaPrompt } = require('../utils/bdd-validacoes');
 const { planificarFeatureBdd } = require('../utils/bdd-scenario-planner');
 const {
@@ -35,6 +36,7 @@ function ctxTemDadosParaBdd(ctx) {
   }
   return (
     ctxTemCamposEstruturados(ctx) ||
+    !!limparTexto(ctx.titulo) ||
     !!limparTexto(ctx.cenariosTesteDev) ||
     !!limparTexto(ctx.descricao) ||
     !!limparTexto(ctx.passos) ||
@@ -129,6 +131,13 @@ function buildStructuredBdd(title, ctx) {
     if (temNgf && blocosDev.length === 0) {
       const { cenariosPrincipalNgf } = require('../utils/bdd-gherkin');
       for (const linhas of cenariosPrincipalNgf(ctx, nomeFuncionalidade)) {
+        out.push(...linhas);
+        out.push('');
+      }
+    }
+    if (blocosDev.length === 0 && !/cenário\s*:/i.test(out.join('\n'))) {
+      const { cenariosSmokeAPartirDoTitulo } = require('../utils/bdd-gherkin');
+      for (const linhas of cenariosSmokeAPartirDoTitulo(ctx, nomeFuncionalidade)) {
         out.push(...linhas);
         out.push('');
       }
@@ -284,7 +293,11 @@ function bddLlmOutputValido(texto) {
   if (!/funcionalidade\s*:/i.test(t) && !/cenário\s*:/i.test(t)) return false;
   if (PASSOS_BLOQUEADOS_LLM.test(t)) return false;
   if (/tarefa\s+aberta|evid[eê]ncias?\s+enviadas/i.test(t)) return false;
-  if (!/acessa\s+o\s+ambiente/i.test(t)) return false;
+  if (
+    !/acessa\s+o\s+ambiente|dado\s+que\s+o\s+usu[aá]rio\s+acessa/i.test(t)
+  ) {
+    return false;
+  }
   return true;
 }
 
@@ -305,6 +318,7 @@ async function generateBddViaLlm(title, ctx, meta = {}) {
 async function prepararCtxBdd(title, item) {
   const fullCtx = extractTaskContext(item);
   let ctx = await enrichCtxWithEvidence(fullCtx, item, title);
+  ctx = await enrichCtxFromLinkedCrm(ctx, item);
 
   // Não usa histórico antigo de QA para evitar contaminação de contexto.
   ctx.qaHistorico = { isRetornoQa: false, reason: '' };
@@ -357,15 +371,6 @@ async function generateBDD(title, item) {
 
   if (blocosDev.length === 0 && process.env.BDD_PREFER_STRUCTURED === '1') {
     return structured();
-  }
-
-  const cardSemContextoExecutavel =
-    blocosDev.length === 0 &&
-    !ctxTemCamposEstruturados(ctx) &&
-    !limparTexto(ctx.comentariosTarefa);
-
-  if (cardSemContextoExecutavel) {
-    return '# Não foi possível gerar BDD executável (somente título no card; preencha descrição/comentários/evidências)\n';
   }
 
   if (!isLlmEnabled()) {

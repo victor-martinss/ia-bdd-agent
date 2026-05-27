@@ -18,7 +18,7 @@ const stageHistoryCache = new Map();
 const allStagesCache = new Map();
 
 function qaHistoryCheckEnabled() {
-  return process.env.BITRIX_SKIP_BDD_IF_QA_HISTORY !== '0';
+  return process.env.BITRIX_SKIP_BDD_IF_QA_HISTORY === '1';
 }
 
 function parseNameList(envVar, fallback) {

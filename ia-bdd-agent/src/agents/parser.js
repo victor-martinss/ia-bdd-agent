@@ -63,6 +63,9 @@ function textoCenariosTesteDevFromItem(item) {
     'ufCrm94CenariosDeTesteDev',
     'ufCrm94CenariosTesteDev',
     'ufCrm94CenarioDeTesteDev',
+    'ufCrm100CenariosDeTesteDev',
+    'ufCrm100CenariosTesteDev',
+    'ufCrm100CenarioDeTesteDev',
   ];
   for (const k of fallbacks) {
     if (isMeaningful(item[k])) return texto(item[k]);

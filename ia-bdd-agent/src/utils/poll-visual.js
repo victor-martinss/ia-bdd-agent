@@ -117,6 +117,20 @@ function printGeneratedError(id, message) {
   console.log('');
 }
 
+/**
+ * BDD gerado em arquivo mas não publicado no CRM (sem contexto / placeholder).
+ * @param {{ id: string|number, title?: string }} row
+ * @param {string} [reason]
+ */
+function printCrmNotUpdated(row, reason) {
+  console.log(
+    paint(c.yellow + c.bold, ` ⚠ SEM GRAVAÇÃO CRM `) +
+      paint(c.yellow, ` item ${row.id} `) +
+      paint(c.dim, reason || 'BDD inválido ou sem contexto no card')
+  );
+  console.log('');
+}
+
 function printScanProgress(index, total, id, title) {
   const ts = logTimestampBr();
   const titulo = (title || '').slice(0, 40);
@@ -184,6 +198,7 @@ module.exports = {
   printNewInQueueAlert,
   printGeneratedSuccess,
   printGeneratedError,
+  printCrmNotUpdated,
   printScanProgress,
   printCycleSummary,
 };
