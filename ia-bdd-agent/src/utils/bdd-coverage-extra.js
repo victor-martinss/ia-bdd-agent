@@ -1,5 +1,10 @@
 const { detectAmbiente, dadoAcessaAmbiente } = require('./bdd-ambiente');
-const { limparTexto, passosParaStepsGherkin, nomeFuncionalidadeCurto } = require('./bdd-gherkin');
+const {
+  limparTexto,
+  passosParaStepsGherkin,
+  nomeFuncionalidadeCurto,
+  comentarioRefCobertura,
+} = require('./bdd-gherkin');
 const { extrairValidacoesExatas } = require('./bdd-validacoes');
 
 function coverageExtraEnabled() {
@@ -98,9 +103,10 @@ function devJaCobre(todosBlocos, padroes) {
   return padroes.some((p) => p.test(blob));
 }
 
-function montarCenarioExtra(titulo, ctx, passosTexto, entao) {
+function montarCenarioExtra(titulo, ctx, passosTexto, entao, refRelacionada = null) {
   const linhas = [
     `Cenário: ${titulo}`,
+    ...comentarioRefCobertura(refRelacionada || ctx.titulo, { fase: 'cobertura complementar' }),
     dadoAcessaAmbiente(ctx.ambiente || detectAmbiente(ctx.titulo, ctx.cenariosTesteDev)),
   ];
   const quando = passosParaStepsGherkin(passosTexto);

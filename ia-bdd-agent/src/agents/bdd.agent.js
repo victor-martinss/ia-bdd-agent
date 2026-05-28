@@ -97,12 +97,16 @@ function buildStructuredBdd(title, ctx) {
                 return linhas;
               })
             : quandoFb
-              ? dividirCenarioCompletoPorMaxE(tituloDefeito, [
-                  ...montarDadosIniciais(ctx),
-                  quandoFb,
-                  `  Então ${obtido}`,
-                  ...(mas ? [mas] : []),
-                ])
+              ? dividirCenarioCompletoPorMaxE(
+                  tituloDefeito,
+                  [
+                    ...montarDadosIniciais(ctx),
+                    quandoFb,
+                    `  Então ${obtido}`,
+                    ...(mas ? [mas] : []),
+                  ],
+                  { refDev: 'reprodução do defeito (NGF)' }
+                )
               : [];
         for (const linhas of partesDefeito) {
           out.push(...linhas);
@@ -172,12 +176,16 @@ function buildStructuredBdd(title, ctx) {
                 return linhas;
               })
             : quandoFb
-              ? dividirCenarioCompletoPorMaxE(titulo, [
-                  ...montarDadosIniciais(ctx),
-                  quandoFb,
-                  entao,
-                  ...(mas ? [mas] : []),
-                ])
+              ? dividirCenarioCompletoPorMaxE(
+                  titulo,
+                  [
+                    ...montarDadosIniciais(ctx),
+                    quandoFb,
+                    entao,
+                    ...(mas ? [mas] : []),
+                  ],
+                  { refDev: 'reprodução do defeito (NGF)' }
+                )
               : [];
         for (const linhas of partes) {
           out.push(...linhas);

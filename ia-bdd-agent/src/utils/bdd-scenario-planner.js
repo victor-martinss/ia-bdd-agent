@@ -372,7 +372,21 @@ function ordenarCenarios(cenarios, ctx) {
   });
 }
 
-function montarCabecalhoPlano(ctx, qtdDev, qtdExtra, qtdLacunas, removidos) {
+function extrairMapaCoberturaDev(cenarios) {
+  const mapa = [];
+  for (const cen of cenarios) {
+    const ref = (cen.linhas || []).find((l) => /^#\s*cobertura\s+dev\s*:/i.test(l.trim()));
+    if (!ref) continue;
+    const dev = ref.replace(/^#\s*cobertura\s+dev\s*:\s*/i, '').trim();
+    const tituloQa = cen.titulo.replace(/\s*—\s*(continuação|fase).*$/i, '').trim();
+    if (dev && tituloQa && !mapa.some((m) => m.dev === dev && m.qa === tituloQa)) {
+      mapa.push({ dev, qa: tituloQa });
+    }
+  }
+  return mapa;
+}
+
+function montarCabecalhoPlano(ctx, qtdDev, qtdExtra, qtdLacunas, removidos, cenarios = []) {
   const linhas = [];
   const partes = [`${qtdDev} do Dev`];
   if (qtdExtra) partes.push(`${qtdExtra} cobertura`);
@@ -380,6 +394,14 @@ function montarCabecalhoPlano(ctx, qtdDev, qtdExtra, qtdLacunas, removidos) {
   linhas.push(`# Cenários QA: ${partes.join(' + ')} — ordem por risco/criticidade`);
   if (ctx.resumoObjetivo) {
     linhas.push(`# ${ctx.resumoObjetivo}`);
+  }
+  const mapa = extrairMapaCoberturaDev(cenarios);
+  if (mapa.length) {
+    const resumo = mapa
+      .slice(0, 8)
+      .map((m) => `${m.qa} ← Dev: ${m.dev}`)
+      .join('; ');
+    linhas.push(`# Mapa cobertura: ${resumo}`);
   }
   if (removidos.length) {
     linhas.push(`# Redundantes removidos: ${removidos.slice(0, 6).join('; ')}`);
@@ -432,7 +454,14 @@ function planificarFeatureBdd(feature, ctx, meta = {}) {
   const qtdDev = meta.qtdDev ?? semDup.filter((c) => !/cobertura|lacuna/i.test(c.titulo)).length;
   const qtdExtra = todos.filter((c) => /cobertura\s*—/i.test(c.titulo)).length;
   const qtdLacunas = todos.filter((c) => /lacuna\s*—/i.test(c.titulo)).length;
-  const planHeader = montarCabecalhoPlano(ctx, qtdDev, qtdExtra, qtdLacunas, removidos);
+  const planHeader = montarCabecalhoPlano(
+    ctx,
+    qtdDev,
+    qtdExtra,
+    qtdLacunas,
+    removidos,
+    todos
+  );
 
   const out = [...planHeader, ''];
   if (funcIdx >= 0 && headerLimpo[funcIdx]) {

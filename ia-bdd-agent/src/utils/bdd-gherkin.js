@@ -46,6 +46,13 @@ function maxEPorCenario() {
   return Number.isFinite(n) && n >= 1 ? Math.min(n, 4) : 3;
 }
 
+/** Teto de linhas E no cenário inteiro (Dado + Quando); padrão = maxEPorCenario(). */
+function maxTotalEPorCenario() {
+  const n = Number.parseInt(process.env.BDD_MAX_TOTAL_E_STEPS || '', 10);
+  if (Number.isFinite(n) && n >= 2) return Math.min(n, 8);
+  return maxEPorCenario();
+}
+
 /** Ações brutas por cenário antes de resumir (evita "parte 2" desnecessária). */
 function maxAcoesBrutasPorCenario() {
   const n = Number.parseInt(process.env.BDD_MAX_ACOES_POR_CENARIO || '8', 10);
@@ -597,63 +604,267 @@ function dividirAcaoEmChunks(acaoLinhas, maxE) {
   return chunks;
 }
 
-/**
- * Divide um cenário quando há mais de maxE linhas "E".
- * @param {string} tituloBase
- * @param {string[]} linhasCorpo
- * @returns {string[][]}
- */
-function dividirCenarioCompletoPorMaxE(tituloBase, linhasCorpo) {
-  const maxE = maxEPorCenario();
-  const maxSlots = 1 + maxE;
-  const { dado, acao, entao, mas } = separarTiposLinhas(linhasCorpo);
+function contarLinhasE(linhas) {
+  return (linhas || []).filter((ln) => isLinhaE(ln)).length;
+}
 
+function extrairTextosPassosDeLinhas(linhas) {
   const textos = [];
-  for (const ln of acao) {
+  for (const ln of linhas || []) {
+    if (/^\s*Dado/i.test(ln)) continue;
     const m = String(ln).match(/^\s*(?:Quando|E)\s+(.+)$/i);
     if (m && m[1] && !passoEhPlaceholder(m[1])) textos.push(m[1].trim());
   }
+  return textos;
+}
+
+function primeiraLinhaDado(linhas) {
+  return (linhas || []).find((ln) => /^\s*Dado/i.test(ln)) || null;
+}
+
+function labelAmbienteDeDado(linhaDado) {
+  const m = String(linhaDado || '').match(/acessa\s+o\s+ambiente\s+(.+?)\s*$/i);
+  if (m && m[1]) return normalizarTitulo(m[1]).slice(0, 48);
+  return '';
+}
+
+function dadoContinuacaoFluxo() {
+  return '  Dado que os passos preparatórios do cenário foram executados';
+}
+
+/**
+ * Comentário Gherkin ligando cenário QA ao teste Dev / parte do fluxo.
+ * @param {string} [refDev]
+ * @param {{ parte?: number, fase?: string }} [meta]
+ * @returns {string[]}
+ */
+function comentarioRefCobertura(refDev, meta = {}) {
+  if (process.env.BDD_COBERTURA_REF === '0') return [];
+  const linhas = [];
+  if (refDev && limparTexto(refDev)) {
+    linhas.push(`# Cobertura Dev: ${normalizarTitulo(refDev)}`);
+  }
+  if (meta.fase) linhas.push(`# Fase: ${meta.fase}`);
+  if (meta.parte && meta.parte > 1) linhas.push(`# Parte ${meta.parte}`);
+  return linhas;
+}
+
+function montarBlocoCenario(tituloBase, corpo, opts = {}) {
+  const { refDev, parte, fase } = opts;
+  return [
+    `Cenário: ${tituloBase}`,
+    ...comentarioRefCobertura(refDev, { parte, fase }),
+    ...corpo,
+  ];
+}
+
+/**
+ * Divide cenário com 2+ blocos "Dado … acessa o ambiente" (integração worklist×portal).
+ * @returns {string[][]|null}
+ */
+function dividirCenarioPorFasesAmbiente(tituloBase, linhasCorpo, opts = {}) {
+  const { dado, acao, entao, mas } = separarTiposLinhas(linhasCorpo);
+  const todas = [...dado, ...acao];
+  const indices = [];
+  todas.forEach((ln, i) => {
+    if (/^\s*Dado\s+que.*acessa\s+o\s+ambiente/i.test(ln)) indices.push(i);
+  });
+  if (indices.length < 2) return null;
+
+  const fases = [];
+  for (let f = 0; f < indices.length; f++) {
+    const start = indices[f];
+    const end = f + 1 < indices.length ? indices[f + 1] : todas.length;
+    fases.push(todas.slice(start, end));
+  }
+
+  const maxE = maxEPorCenario();
+  const maxSlots = 1 + maxE;
+  const janela = maxAcoesBrutasPorCenario();
+  const blocos = [];
+
+  for (let f = 0; f < fases.length; f++) {
+    const faseLinhas = fases[f];
+    const dadoAmb = primeiraLinhaDado(faseLinhas);
+    const faseLabel = labelAmbienteDeDado(dadoAmb) || `fase ${f + 1}`;
+    const textos = extrairTextosPassosDeLinhas(faseLinhas);
+    const prefixoDado =
+      f === 0 ? (dadoAmb ? [dadoAmb] : []) : [dadoContinuacaoFluxo(), ...(dadoAmb ? [dadoAmb] : [])];
+
+    if (!textos.length) {
+      blocos.push({
+        titulo: `${tituloBase} — ${faseLabel}`,
+        corpo: [...prefixoDado, '  Quando o usuário executa o fluxo descrito no chamado'],
+        fase: faseLabel,
+        parte: f + 1,
+        ultimo: f === fases.length - 1,
+      });
+      continue;
+    }
+
+    for (let i = 0; i < textos.length; i += janela) {
+      const resumidas = consolidarAcoesObjetivas(
+        textos.slice(i, i + janela),
+        maxSlots
+      );
+      const acaoGherkin = acoesParaLinhasGherkin(resumidas);
+      const parteFluxo = Math.floor(i / janela) + 1;
+      const suffixCont =
+        textos.length > janela && parteFluxo > 1 ? ' — continuação' : '';
+      blocos.push({
+        titulo: `${tituloBase} — ${faseLabel}${suffixCont}`,
+        corpo: [...(i === 0 ? prefixoDado : [dadoContinuacaoFluxo()]), ...acaoGherkin],
+        fase: faseLabel,
+        parte: blocos.length + 1,
+        ultimo: f === fases.length - 1 && i + janela >= textos.length,
+      });
+    }
+  }
+
+  if (blocos.length <= 1) return null;
+
+  const ultimoIdx = blocos.length - 1;
+  return blocos.map((b, idx) => {
+    const corpo = [...b.corpo];
+    if (idx === ultimoIdx) {
+      if (entao) corpo.push(entao);
+      if (mas) corpo.push(mas);
+    }
+    return montarBlocoCenario(b.titulo, corpo, {
+      refDev: opts.refDev,
+      parte: b.parte,
+      fase: b.fase,
+    });
+  });
+}
+
+/**
+ * Divide passos (Dado E + Quando/E) em cenários menores respeitando maxE.
+ * @returns {string[][]}
+ */
+function dividirCenarioPorTotalPassos(tituloBase, dado, acao, entao, mas, opts = {}) {
+  const maxE = maxEPorCenario();
+  const maxSlots = 1 + maxE;
+  const janela = maxAcoesBrutasPorCenario();
+  const dadoAmb = primeiraLinhaDado(dado);
+  const textos = [
+    ...extrairTextosPassosDeLinhas(dado),
+    ...extrairTextosPassosDeLinhas(acao),
+  ];
 
   if (!textos.length) {
+    const corpo = [
+      ...(dadoAmb ? [dadoAmb] : dado),
+      '  Quando o usuário executa o fluxo descrito no chamado',
+    ];
+    if (entao) corpo.push(entao);
+    if (mas) corpo.push(mas);
+    return [montarBlocoCenario(tituloBase, corpo, opts)];
+  }
+
+  const partes = [];
+  for (let i = 0; i < textos.length; i += janela) {
+    const resumidas = consolidarAcoesObjetivas(
+      textos.slice(i, i + janela),
+      maxSlots
+    );
+    partes.push(acoesParaLinhasGherkin(resumidas));
+  }
+
+  if (partes.length <= 1) {
+    const corpo = [...(dadoAmb ? [dadoAmb] : dado), ...partes[0]];
+    if (entao) corpo.push(entao);
+    if (mas) corpo.push(mas);
+    return [montarBlocoCenario(tituloBase, corpo, opts)];
+  }
+
+  return partes.map((acaoPart, idx) => {
+    const suffix = idx > 0 ? ' — continuação' : '';
+    const prefixo =
+      idx === 0
+        ? dadoAmb
+          ? [dadoAmb]
+          : dado.filter((ln) => /^\s*Dado/i.test(ln))
+        : [dadoContinuacaoFluxo()];
+    const corpo = [...prefixo, ...acaoPart];
+    const ultimo = idx === partes.length - 1;
+    if (ultimo && entao) corpo.push(entao);
+    if (ultimo && mas) corpo.push(mas);
+    return montarBlocoCenario(`${tituloBase}${suffix}`, corpo, {
+      ...opts,
+      parte: idx + 1,
+    });
+  });
+}
+
+/**
+ * Divide um cenário quando há mais de maxE linhas "E" (inclui E sob Dado).
+ * @param {string} tituloBase
+ * @param {string[]} linhasCorpo
+ * @param {{ refDev?: string }} [opts]
+ * @returns {string[][]}
+ */
+function dividirCenarioCompletoPorMaxE(tituloBase, linhasCorpo, opts = {}) {
+  const maxE = maxEPorCenario();
+  const maxTotal = maxTotalEPorCenario();
+  const { dado, acao, entao, mas } = separarTiposLinhas(linhasCorpo);
+
+  const porFases = dividirCenarioPorFasesAmbiente(tituloBase, linhasCorpo, opts);
+  if (porFases) return porFases;
+
+  const totalE = contarLinhasE(dado) + contarLinhasE(acao);
+  const textosAcao = extrairTextosPassosDeLinhas(acao);
+  const janela = maxAcoesBrutasPorCenario();
+
+  if (!textosAcao.length && totalE <= maxTotal) {
     const corpo = [
       ...dado,
       '  Quando o usuário executa o fluxo descrito no chamado',
     ];
     if (entao) corpo.push(entao);
     if (mas) corpo.push(mas);
-    return [[`Cenário: ${tituloBase}`, ...corpo]];
+    return [montarBlocoCenario(tituloBase, corpo, opts)];
   }
 
-  const janela = maxAcoesBrutasPorCenario();
-  const partesAcao = [];
+  if (totalE > maxTotal || textosAcao.length > janela) {
+    return dividirCenarioPorTotalPassos(tituloBase, dado, acao, entao, mas, opts);
+  }
 
-  if (textos.length <= janela) {
-    const resumidas = consolidarAcoesObjetivas(textos, maxSlots);
-    partesAcao.push(acoesParaLinhasGherkin(resumidas));
+  const maxSlots = 1 + maxE;
+  const partesAcao = [];
+  if (textosAcao.length <= janela) {
+    partesAcao.push(
+      acoesParaLinhasGherkin(consolidarAcoesObjetivas(textosAcao, maxSlots))
+    );
   } else {
-    for (let i = 0; i < textos.length; i += janela) {
-      const resumidas = consolidarAcoesObjetivas(
-        textos.slice(i, i + janela),
-        maxSlots
+    for (let i = 0; i < textosAcao.length; i += janela) {
+      partesAcao.push(
+        acoesParaLinhasGherkin(
+          consolidarAcoesObjetivas(textosAcao.slice(i, i + janela), maxSlots)
+        )
       );
-      partesAcao.push(acoesParaLinhasGherkin(resumidas));
     }
   }
 
-  if (partesAcao.length === 1) {
+  if (partesAcao.length === 1 && totalE <= maxTotal) {
     const corpo = [...dado, ...partesAcao[0]];
     if (entao) corpo.push(entao);
     if (mas) corpo.push(mas);
-    return [[`Cenário: ${tituloBase}`, ...corpo]];
+    return [montarBlocoCenario(tituloBase, corpo, opts)];
   }
 
   return partesAcao.map((acaoPart, idx) => {
-    const suffix = idx > 0 ? ` — continuação` : '';
-    const corpo = [...dado, ...acaoPart];
+    const suffix = idx > 0 ? ' — continuação' : '';
+    const dadoAmb = primeiraLinhaDado(dado);
+    const prefixo = idx === 0 ? (dadoAmb ? [dadoAmb] : []) : [dadoContinuacaoFluxo()];
+    const corpo = [...prefixo, ...acaoPart];
     const ultimo = idx === partesAcao.length - 1;
     if (ultimo && entao) corpo.push(entao);
     if (ultimo && mas) corpo.push(mas);
-    return [`Cenário: ${tituloBase}${suffix}`, ...corpo];
+    return montarBlocoCenario(`${tituloBase}${suffix}`, corpo, {
+      ...opts,
+      parte: idx + 1,
+    });
   });
 }
 
@@ -1010,14 +1221,15 @@ function cenariosQaAPartirDoDev(bloco, ctx, nomeFuncionalidade) {
   const titulo = bloco.title
     ? normalizarTitulo(bloco.title)
     : `${nomeFuncionalidadeCurto(nomeFuncionalidade)} — validação`;
+  const refDev = bloco.title || null;
 
   const passosCorpo = extrairQuandoEntaoDoCorpo(bloco.body);
   if (passosCorpo.quando && passosCorpo.entao) {
-    return dividirCenarioCompletoPorMaxE(titulo, [
-      ...montarDadosIniciais(ctx),
-      passosCorpo.quando,
-      passosCorpo.entao,
-    ]);
+    return dividirCenarioCompletoPorMaxE(
+      titulo,
+      [...montarDadosIniciais(ctx), passosCorpo.quando, passosCorpo.entao],
+      { refDev }
+    );
   }
 
   const { entaoParaBlocoDev } = require('./bdd-rigor');
@@ -1035,7 +1247,7 @@ function cenariosQaAPartirDoDev(bloco, ctx, nomeFuncionalidade) {
     if (!gherkinDev.some((l) => /^\s*Então/i.test(l))) {
       corpo.push(entao);
     }
-    return dividirCenarioCompletoPorMaxE(titulo, corpo);
+    return dividirCenarioCompletoPorMaxE(titulo, corpo, { refDev });
   }
 
   const passosMerged =
@@ -1053,18 +1265,21 @@ function cenariosQaAPartirDoDev(bloco, ctx, nomeFuncionalidade) {
     const { quandoSubstituto } = require('./bdd-rigor');
     const quando = passosCorpo.quando || quandoSubstituto(ctx);
     if (!quando) return [];
-    return dividirCenarioCompletoPorMaxE(titulo, [
-      ...montarDadosIniciais(ctx),
-      quando,
-      entao,
-    ]);
+    return dividirCenarioCompletoPorMaxE(
+      titulo,
+      [...montarDadosIniciais(ctx), quando, entao],
+      { refDev }
+    );
   }
 
-  return chunks.map((passos, idx) => {
+  return chunks.flatMap((passos, idx) => {
     const suffix = idx > 0 ? ` — continuação` : '';
-    const linhas = [`Cenário: ${titulo}${suffix}`, ...montarDadosIniciais(ctx), ...passos];
-    if (idx === chunks.length - 1) linhas.push(entao);
-    return linhas;
+    const corpo = [...montarDadosIniciais(ctx), ...passos];
+    if (idx === chunks.length - 1) corpo.push(entao);
+    return dividirCenarioCompletoPorMaxE(`${titulo}${suffix}`, corpo, {
+      refDev,
+      parte: idx + 1,
+    });
   });
 }
 
@@ -1385,7 +1600,9 @@ module.exports = {
   consolidarAcoesObjetivas,
   acoesParaLinhasGherkin,
   dividirCenarioCompletoPorMaxE,
+  comentarioRefCobertura,
   maxEPorCenario,
+  maxTotalEPorCenario,
   extrairPassosDoTexto,
   mergePassosFontes,
   parseCenariosDevBlocos,
