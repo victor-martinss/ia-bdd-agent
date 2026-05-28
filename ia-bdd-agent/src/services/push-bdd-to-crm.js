@@ -4,6 +4,10 @@ const { itemTemHistoricoQa, qaHistoryCheckEnabled } = require('./crm-qa-history'
 const {
   defaultAppendMarker,
   mergeFeatureEnabled,
+  cleanCrmWriteEnabled,
+  cleanGherkinForCrmField,
+  fieldHasIaAutomationArtifacts,
+  fieldShouldRewriteToCleanBdd,
   crmFieldHasMergeMarker,
   appendOrMergeBddInCrmField,
 } = require('../utils/bdd-crm-merge');
@@ -227,15 +231,42 @@ function classifyBddQaItemAction(detail) {
     };
   }
 
-  if (mergeFeatureEnabled()) {
+  if (mergeFeatureEnabled() && !cleanCrmWriteEnabled()) {
     const marker = defaultAppendMarker();
     const hasMarker = crmFieldHasMergeMarker(text, marker);
+    if (hasMarker) {
+      return {
+        action: 'merge',
+        fieldKey,
+        reason: 'atualizar bloco IA abaixo do marcador (aprovados preservados)',
+      };
+    }
+    if (fieldShouldRewriteToCleanBdd(text)) {
+      return {
+        action: 'generate',
+        fieldKey,
+        reason: 'substituir BDD inválido/marcador IA por cenários limpos (sem append)',
+      };
+    }
+    if (process.env.BITRIX_BDD_APPEND_WITHOUT_MARKER === '1') {
+      return {
+        action: 'merge',
+        fieldKey,
+        reason: `preservar conteúdo e acrescentar bloco IA (marcador ${marker})`,
+      };
+    }
     return {
-      action: 'merge',
+      action: 'skip_filled',
       fieldKey,
-      reason: hasMarker
-        ? 'atualizar bloco IA abaixo do marcador (aprovados preservados)'
-        : `cenários em ${fieldKey || 'Cenários QA'} — preservar conteúdo e gravar bloco IA (marcador ${marker})`,
+      reason: 'cenários QA já preenchidos (merge ativo sem marcador — não injeta append)',
+    };
+  }
+
+  if (text && fieldShouldRewriteToCleanBdd(text)) {
+    return {
+      action: 'generate',
+      fieldKey,
+      reason: 'reescrever campo com BDD Gherkin limpo (sem append / sem E cenário)',
     };
   }
 
@@ -308,16 +339,40 @@ async function pushBddToCrmCenariosQa(taskId, bdd, options = {}) {
     return { skipped: true, reason: 'bdd inválido ou placeholder' };
   }
 
-  let valor = bdd.trim();
+  let valor = cleanCrmWriteEnabled() ? cleanGherkinForCrmField(bdd) : bdd.trim();
   const flat = flattenItem(detail || {});
   const { text: existingQaText } = qaBddFieldTextFromFlat(flat);
-  if (mergeFeatureEnabled() && existingQaText) {
-    valor = appendOrMergeBddInCrmField(existingQaText, valor, defaultAppendMarker());
+  const marker = defaultAppendMarker();
+  const podeMesclarAbaixoMarcador =
+    !cleanCrmWriteEnabled() &&
+    mergeFeatureEnabled() &&
+    existingQaText &&
+    crmFieldHasMergeMarker(existingQaText, marker);
+
+  if (podeMesclarAbaixoMarcador) {
+    valor = cleanGherkinForCrmField(
+      appendOrMergeBddInCrmField(existingQaText, valor, marker) || valor
+    );
     if (process.env.DEBUG_BITRIX === '1' && !quiet) {
       console.log(
-        `[CRM] item ${taskId} — mesclando BDD no campo QA (conteúdo manual preservado)`
+        `[CRM] item ${taskId} — mesclando BDD abaixo do marcador (aprovados preservados)`
       );
     }
+  } else if (
+    mergeFeatureEnabled() &&
+    existingQaText &&
+    process.env.BITRIX_BDD_APPEND_WITHOUT_MARKER === '1'
+  ) {
+    valor = appendOrMergeBddInCrmField(existingQaText, valor, marker);
+    if (process.env.DEBUG_BITRIX === '1' && !quiet) {
+      console.log(
+        `[CRM] item ${taskId} — append com marcador IA (legado BITRIX_BDD_APPEND_WITHOUT_MARKER=1)`
+      );
+    }
+  } else if (!quiet && existingQaText && fieldShouldRewriteToCleanBdd(existingQaText)) {
+    console.log(
+      `[CRM] item ${taskId} — substituindo campo por BDD limpo (Gherkin válido, sem append)`
+    );
   }
 
   valor = truncarParaCampoUf(valor);

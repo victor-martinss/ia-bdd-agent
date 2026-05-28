@@ -21,6 +21,62 @@ function mergeFeatureEnabled() {
   return process.env.BITRIX_BDD_MERGE_BELOW_MARKER === '1';
 }
 
+/** Substituição limpa no UF (sem marcador / bloco [IA]). Padrão ligado. */
+function cleanCrmWriteEnabled() {
+  return process.env.BITRIX_BDD_CLEAN_CRM_WRITE !== '0';
+}
+
+/**
+ * Remove artefatos de automação do texto gravado no CRM (marcador, cabeçalho [IA], mapa).
+ * @param {string} text
+ */
+function cleanGherkinForCrmField(text) {
+  const marker = defaultAppendMarker();
+  const lines = normalizeNewlines(text).split('\n');
+  const out = [];
+
+  for (const line of lines) {
+    const t = line.trim();
+    if (!t) {
+      out.push('');
+      continue;
+    }
+    if (t === marker || /^<<<\s*BDD_IA_APPEND\s*>>>$/i.test(t)) continue;
+    if (/^#\s*\[IA\]\s*Cenários sugeridos/i.test(t)) continue;
+    if (/^#\s*Mapa cobertura:/i.test(t)) continue;
+    if (/^#\s*Redundantes removidos:/i.test(t)) continue;
+    out.push(line);
+  }
+
+  return out
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trimEnd();
+}
+
+function fieldHasIaAutomationArtifacts(text) {
+  const t = normalizeNewlines(text);
+  if (!t.trim()) return false;
+  if (crmFieldHasMergeMarker(t, defaultAppendMarker())) return true;
+  if (/BDD_IA_APPEND/i.test(t)) return true;
+  if (/^\s*#\s*\[IA\]\s*Cenários sugeridos/im.test(t)) return true;
+  return false;
+}
+
+/** BDD gerado pela IA fora do padrão Gherkin (ex.: linhas "E cenário:"). */
+function fieldHasMalformedLlmGherkin(text) {
+  const t = normalizeNewlines(text);
+  if (!t.trim()) return false;
+  if (/^\s*E\s+cen[aá]rio\s*:/im.test(t)) return true;
+  if (!/^\s*Cen[aá]rio\s*:/im.test(t) && /cen[aá]rio\s*:/i.test(t)) return true;
+  return false;
+}
+
+function fieldShouldRewriteToCleanBdd(text) {
+  if (process.env.BITRIX_BDD_REWRITE_IA_BLOCKS === '0') return false;
+  return fieldHasIaAutomationArtifacts(text) || fieldHasMalformedLlmGherkin(text);
+}
+
 /**
  * @param {string} text
  * @param {string} markerLine trim exato da linha
@@ -102,6 +158,11 @@ function appendOrMergeBddInCrmField(existingRaw, novaFeature, markerLine) {
 module.exports = {
   defaultAppendMarker,
   mergeFeatureEnabled,
+  cleanCrmWriteEnabled,
+  cleanGherkinForCrmField,
+  fieldHasIaAutomationArtifacts,
+  fieldHasMalformedLlmGherkin,
+  fieldShouldRewriteToCleanBdd,
   crmFieldHasMergeMarker,
   mergeBddBelowMarker,
   appendOrMergeBddInCrmField,

@@ -367,9 +367,12 @@ async function generateBDD(title, item) {
   const structured = () => buildStructuredBdd(title, ctx);
 
   const forceLlm = process.env.BDD_ASSERTIVE_LLM === '1';
+  const llmExplicit = process.env.BDD_USE_LLM === '1';
   const preferStructured =
     process.env.BDD_PREFER_STRUCTURED === '1' ||
-    (!forceLlm && process.env.BDD_ASSERTIVE_MODE !== '0') ||
+    (process.env.BDD_PREFER_STRUCTURED !== '0' &&
+      process.env.BDD_ASSERTIVE_MODE !== '0' &&
+      !forceLlm) ||
     (blocosDev.length > 0 && !isLlmEnabled()) ||
     (blocosDev.length > 0 && !forceLlm);
 
@@ -377,11 +380,11 @@ async function generateBDD(title, item) {
     return structured();
   }
 
-  if (blocosDev.length === 0 && process.env.BDD_PREFER_STRUCTURED === '1') {
+  if (blocosDev.length === 0 && preferStructured) {
     return structured();
   }
 
-  if (!isLlmEnabled()) {
+  if (!isLlmEnabled() || !llmExplicit) {
     return structured();
   }
 
