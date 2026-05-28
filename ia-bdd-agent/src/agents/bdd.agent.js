@@ -390,7 +390,9 @@ async function generateBDD(title, item) {
     if (bddLlmOutputValido(fromLlm)) {
       return fromLlm;
     }
-    console.warn('[BDD] resposta OpenAI/LLM fora do padrão — fallback estruturado');
+    if (fromLlm && fromLlm.trim()) {
+      console.warn('[BDD] resposta OpenAI/LLM fora do padrão — fallback estruturado');
+    }
   } catch (e) {
     console.warn(
       `[BDD] IA (${process.env.BDD_AI_PROVIDER || 'auto'}) falhou — fallback estruturado: ${e.message || e}`

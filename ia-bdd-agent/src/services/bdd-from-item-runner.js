@@ -55,6 +55,7 @@ async function runBddForSingleCrmItem(packageRoot, opts) {
           title,
           _entityTypeId: et || detail._entityTypeId,
           _prefetchedDetail: detail,
+          _forceCrmPush: true,
         },
       ],
       quiet,

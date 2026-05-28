@@ -1,4 +1,4 @@
-const { updateCrmItemFields } = require('./bitrix.service');
+const { updateCrmItemFields, getTaskDetail } = require('./bitrix.service');
 const { isMeaningful, flattenItem } = require('../agents/parser');
 const { itemTemHistoricoQa, qaHistoryCheckEnabled } = require('./crm-qa-history');
 const {
@@ -334,6 +334,30 @@ async function pushBddToCrmCenariosQa(taskId, bdd, options = {}) {
   for (const field of candidates) {
     try {
       await updateCrmItemFields(taskId, { [field]: valor }, { entityTypeId });
+
+      if (process.env.BITRIX_VERIFY_CRM_WRITE !== '0') {
+        try {
+          const refreshed = await getTaskDetail(taskId, { entityTypeId });
+          const flat = flattenItem(refreshed);
+          const gravado = flat[field];
+          if (!crmUfValueMeaningfulForBdd(gravado)) {
+            lastError = `campo ${field} permaneceu vazio após crm.item.update`;
+            if (!quiet) {
+              console.warn(
+                `  ↳ ${lastError} (entityTypeId=${entityTypeId || '?'})`
+              );
+            }
+            continue;
+          }
+        } catch (verifyErr) {
+          if (process.env.DEBUG_BITRIX === '1' && !quiet) {
+            console.warn(
+              `  ↳ verificação pós-gravação ignorada: ${verifyErr.message || verifyErr}`
+            );
+          }
+        }
+      }
+
       if (!quiet) {
         console.log(`📝 CRM atualizado: ${field} (item ${taskId})`);
       }

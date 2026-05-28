@@ -122,6 +122,13 @@ async function runBitrixBddCycle(packageRoot, options = {}) {
       const inQa = stageId ? await isQaStageId(String(stageId), etId) : true;
       const inDev = stageId ? await isDevStageId(String(stageId), etId) : false;
       const publicavel = bddPodePublicarNoCrm(bdd);
+      const veioFilaQa = Boolean(task._queueKey);
+      const forcarGravacaoCrm =
+        veioFilaQa ||
+        task._forceCrmPush === true ||
+        process.env.BITRIX_PUSH_BDD_IGNORE_STAGE === '1' ||
+        classification.action === 'generate' ||
+        classification.action === 'merge';
 
       if (!publicavel && !quiet) {
         console.warn(
@@ -131,8 +138,13 @@ async function runBitrixBddCycle(packageRoot, options = {}) {
 
       if (
         publicavel &&
-        (inQa || process.env.BITRIX_PUSH_BDD_ON_DEV_CARD === '1')
+        (inQa || forcarGravacaoCrm || process.env.BITRIX_PUSH_BDD_ON_DEV_CARD === '1')
       ) {
+        if (!inQa && forcarGravacaoCrm && !quiet && stageId) {
+          console.log(
+            `[CRM] item ${task.id}: estágio "${stageId}" — gravando mesmo assim (fila QA / merge / forçado).`
+          );
+        }
         const crmResult = await pushBddToCrmCenariosQa(task.id, bdd, {
           quiet,
           detail,
@@ -143,11 +155,11 @@ async function runBitrixBddCycle(packageRoot, options = {}) {
           crm.lastField = crmResult.field || crm.lastField;
         } else if (crmResult.skipped) crm.skipped += 1;
         else crm.failed += 1;
-      } else if (!publicavel && inQa) {
+      } else if (!publicavel && (inQa || forcarGravacaoCrm)) {
         crm.skipped += 1;
-      } else if (publicavel && !inQa && !inDev && !quiet) {
+      } else if (publicavel && !inQa && !inDev && !forcarGravacaoCrm && !quiet) {
         console.warn(
-          `[CRM] item ${task.id}: estágio "${stageId || '?'}" não reconhecido como QA (SPA ${etId}) — cenários não gravados. Confira _entityTypeId do card.`
+          `[CRM] item ${task.id}: estágio "${stageId || '?'}" não reconhecido como QA (SPA ${etId}) — cenários não gravados. Use: npm run bdd:item -- ${task.id} ${etId}`
         );
         crm.skipped += 1;
       } else if (!quiet && inDev) {

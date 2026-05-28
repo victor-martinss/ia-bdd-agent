@@ -1539,6 +1539,11 @@ function sanitizarFeatureBdd(feature) {
       continue;
     }
 
+    if (/^\s*E\s+cen[aá]rio\s*:/i.test(trimmed)) {
+      out.push(trimmed.replace(/^\s*E\s+cen[aá]rio\s*:/i, 'Cenário:'));
+      continue;
+    }
+
     if (/^funcionalidade\s*:/i.test(trimmed) || /^cenário\s*:/i.test(trimmed)) {
       out.push(trimmed);
       continue;
