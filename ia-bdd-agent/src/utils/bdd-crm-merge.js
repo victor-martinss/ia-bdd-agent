@@ -26,6 +26,13 @@ function cleanCrmWriteEnabled() {
   return process.env.BITRIX_BDD_CLEAN_CRM_WRITE !== '0';
 }
 
+/** Comentários internos (# Cenários QA, Cobertura Dev…) só em arquivo local, não no CRM. */
+function bddInternalCommentsEnabled() {
+  if (process.env.BDD_PLANNER_COMMENTS === '1') return true;
+  if (process.env.BDD_PLANNER_COMMENTS === '0') return false;
+  return !cleanCrmWriteEnabled();
+}
+
 /**
  * Remove artefatos de automação do texto gravado no CRM (marcador, cabeçalho [IA], mapa).
  * @param {string} text
@@ -42,9 +49,7 @@ function cleanGherkinForCrmField(text) {
       continue;
     }
     if (t === marker || /^<<<\s*BDD_IA_APPEND\s*>>>$/i.test(t)) continue;
-    if (/^#\s*\[IA\]\s*Cenários sugeridos/i.test(t)) continue;
-    if (/^#\s*Mapa cobertura:/i.test(t)) continue;
-    if (/^#\s*Redundantes removidos:/i.test(t)) continue;
+    if (/^#\s/.test(t)) continue;
     out.push(line);
   }
 
@@ -52,6 +57,20 @@ function cleanGherkinForCrmField(text) {
     .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .trimEnd();
+}
+
+function passoGherkinTruncado(text) {
+  const t = normalizeNewlines(text);
+  if (!t.trim()) return false;
+  if (/…/.test(t)) return true;
+  if (/\.\.\.(?!\w)/.test(t)) return true;
+  return false;
+}
+
+function fieldHasInternalAutomationComments(text) {
+  const t = normalizeNewlines(text);
+  if (!t.trim()) return false;
+  return /^#\s*(cenários\s+qa|foco:|cobertura\s+dev|mapa\s+cobertura|redundantes|parte\s+\d|fase:)/im.test(t);
 }
 
 function fieldHasIaAutomationArtifacts(text) {
@@ -71,6 +90,13 @@ function fieldHasMalformedLlmGherkin(text) {
   if (!/^\s*Cen[aá]rio\s*:/im.test(t) && /cen[aá]rio\s*:/i.test(t)) return true;
   if (/^\s*ent[aã]o\s+a\s+mensagem\s*$/im.test(t)) return true;
   if (/^\s*ent[aã]o\s+o\s+(sistema|comportamento|resultado)\s*$/im.test(t)) return true;
+  if (fieldHasInternalAutomationComments(t)) return true;
+  if (/valida[çc][aã]o\s+pelo\s+t[ií]tulo\s+do\s+chamado/i.test(t)) return true;
+
+  for (const line of t.split('\n')) {
+    const lt = line.trim();
+    if (/^\s*(quando|ent[aã]o|e)\s+/i.test(lt) && passoGherkinTruncado(lt)) return true;
+  }
 
   if (/funcionalidade\s*:/i.test(t) || /^\s*cen[aá]rio\s*:/im.test(t)) {
     try {
@@ -171,7 +197,10 @@ module.exports = {
   defaultAppendMarker,
   mergeFeatureEnabled,
   cleanCrmWriteEnabled,
+  bddInternalCommentsEnabled,
   cleanGherkinForCrmField,
+  passoGherkinTruncado,
+  fieldHasInternalAutomationComments,
   fieldHasIaAutomationArtifacts,
   fieldHasMalformedLlmGherkin,
   fieldShouldRewriteToCleanBdd,

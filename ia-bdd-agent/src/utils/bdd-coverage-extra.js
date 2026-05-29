@@ -294,6 +294,8 @@ function gerarCenariosCoberturaExtra(ctx, blocosDev, nomeFuncionalidade) {
  * Cabeçalho informativo (comentário Gherkin) sobre cobertura.
  */
 function cabecalhoCobertura(qtdDev, qtdExtra) {
+  const { bddInternalCommentsEnabled } = require('./bdd-crm-merge');
+  if (!bddInternalCommentsEnabled()) return '';
   if (!coverageExtraEnabled() || qtdExtra === 0) {
     return `# Cenários QA: ${qtdDev} baseado(s) em Cenários Dev\n`;
   }

@@ -418,6 +418,8 @@ function montarCabecalhoPlano(ctx, qtdDev, qtdExtra, qtdLacunas, removidos, cena
 function planificarFeatureBdd(feature, ctx, meta = {}) {
   if (!plannerEnabled() || !feature) return feature;
 
+  const { bddInternalCommentsEnabled } = require('./bdd-crm-merge');
+
   const { header, cenarios } = parseFeatureEmCenarios(feature);
   if (!cenarios.length) return feature;
 
@@ -454,21 +456,27 @@ function planificarFeatureBdd(feature, ctx, meta = {}) {
   const qtdDev = meta.qtdDev ?? semDup.filter((c) => !/cobertura|lacuna/i.test(c.titulo)).length;
   const qtdExtra = todos.filter((c) => /cobertura\s*—/i.test(c.titulo)).length;
   const qtdLacunas = todos.filter((c) => /lacuna\s*—/i.test(c.titulo)).length;
-  const planHeader = montarCabecalhoPlano(
-    ctx,
-    qtdDev,
-    qtdExtra,
-    qtdLacunas,
-    removidos,
-    todos
-  );
+  const planHeader = bddInternalCommentsEnabled()
+    ? montarCabecalhoPlano(
+        ctx,
+        qtdDev,
+        qtdExtra,
+        qtdLacunas,
+        removidos,
+        todos
+      )
+    : [];
+
+  const funcLine =
+    headerLimpo.find((l) => /^funcionalidade\s*:/i.test(l.trim())) ||
+    header.find((l) => /^funcionalidade\s*:/i.test(l.trim()));
 
   const out = [...planHeader, ''];
-  if (funcIdx >= 0 && headerLimpo[funcIdx]) {
-    out.push(headerLimpo[funcIdx], '');
-  } else {
-    const func = header.find((l) => /^funcionalidade\s*:/i.test(l.trim()));
-    if (func) out.push(func, '');
+  if (funcLine) {
+    out.push(funcLine, '');
+  } else if (ctx.titulo) {
+    const { nomeFuncionalidadeCurto } = require('./bdd-gherkin');
+    out.push(`Funcionalidade: ${nomeFuncionalidadeCurto(ctx.titulo)}`, '');
   }
 
   for (const cen of todos) {

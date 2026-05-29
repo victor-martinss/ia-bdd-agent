@@ -648,7 +648,8 @@ function dadoContinuacaoFluxo() {
  * @returns {string[]}
  */
 function comentarioRefCobertura(refDev, meta = {}) {
-  if (process.env.BDD_COBERTURA_REF === '0') return [];
+  const { bddInternalCommentsEnabled } = require('./bdd-crm-merge');
+  if (!bddInternalCommentsEnabled() || process.env.BDD_COBERTURA_REF === '0') return [];
   const linhas = [];
   if (refDev && limparTexto(refDev)) {
     linhas.push(`# Cobertura Dev: ${normalizarTitulo(refDev)}`);
@@ -1356,8 +1357,10 @@ function cenarioPrincipalNgf(ctx, nomeFuncionalidade) {
 function cenariosSmokeAPartirDoTitulo(ctx, nomeFuncionalidade) {
   const tituloCard = limparTexto(ctx.titulo) || limparTexto(nomeFuncionalidade);
   if (!tituloCard) return [];
-  const nomeCurto = nomeFuncionalidadeCurto(nomeFuncionalidade);
-  const tituloCenario = `${nomeCurto} — validação pelo título do chamado`;
+  const parsed = parseTituloParaCenario(tituloCard);
+  const tituloCenario = parsed
+    ? tituloCenarioCurto(limparAspasTitulo(parsed.titulo) || parsed.titulo)
+    : tituloCenarioCurto(fluxoPrincipalDoTitulo(tituloCard) || nomeFuncionalidadeCurto(nomeFuncionalidade));
   const entao = entaoAPartirDoTitulo(tituloCard);
   const passos = passosAPartirDoTitulo(tituloCard);
   if (!entao || !passos.length) return [];
@@ -1461,33 +1464,149 @@ function resolverPassosReproducao(ctx) {
 }
 
 /**
+ * Remove prefixos administrativos do título (Squad, Sustentação, Portal…) e retorna o fluxo.
+ */
+function fluxoPrincipalDoTitulo(titulo) {
+  const t = normalizarTitulo(titulo);
+  if (!t) return '';
+  const partes = t.split(/\s*[-–—]\s*/).map((p) => p.trim()).filter(Boolean);
+  const skip =
+    /^(sustenta[çc][aã]o|desenvolvimento(\s+web|\s+desktop)?|portal(\s+mobilemed)?|mobile(\s+i)?|squad|feature|improvement|fix|bug|\s*x\s*)$/i;
+  while (partes.length > 1 && skip.test(partes[0])) partes.shift();
+  if (partes.length > 1 && /^portal\s+mobilemed$/i.test(partes[0])) partes.shift();
+  let fluxo = partes.join(' — ') || t;
+  fluxo = fluxo.replace(/^portal\s+mobilemed\s+/i, '').trim();
+  return fluxo || t;
+}
+
+/**
+ * Deriva cenário executável a partir do título quando NGF/Dev estão vazios.
+ * @returns {{ titulo: string, e?: string, quando: string, entao: string } | null}
+ */
+function limparAspasTitulo(texto) {
+  return String(texto || '')
+    .replace(/[\u201C\u201D\u201E\u00AB\u00BB\u2039\u203A""''„]/g, '')
+    .trim();
+}
+
+function parseTituloParaCenario(titulo) {
+  const fluxo = fluxoPrincipalDoTitulo(titulo);
+  if (!fluxo || fluxo.length < 12) return null;
+
+  let m = fluxo.match(
+    /campo\s+(.+?)\s+obrigat[oó]ri[oa]\s+indevidamente\s+ao\s+selecionar\s+tipo\s+[«""']?(.+?)[»""']?\s+(?:no\s+|em\s+)(.+)/i
+  );
+  if (m) {
+    const campo = m[1].trim();
+    const tipo = limparAspasTitulo(m[2]);
+    const local = m[3].trim();
+    return {
+      titulo: `${tipo} no ${local} sem exigir ${campo}`,
+      e: `o usuário abre o ${local}`,
+      quando: `o usuário seleciona o tipo "${tipo}" no formulário`,
+      entao: `o campo ${campo} não é exigido como obrigatório`,
+    };
+  }
+
+  m = fluxo.match(
+    /(.+?)\s+obrigat[oó]ri[oa]\s+indevidamente\s+ao\s+selecionar\s+(.+)/i
+  );
+  if (m) {
+    const alvo = m[1].trim();
+    const acao = m[2].trim();
+    return {
+      titulo: `${alvo} — validação ao ${acao}`,
+      e: `o usuário acessa a tela citada no chamado`,
+      quando: `o usuário ${acao.charAt(0).toLowerCase()}${acao.slice(1)}`,
+      entao: `${alvo} não é exigido como obrigatório`,
+    };
+  }
+
+  m = fluxo.match(/(?:n[aã]o|nao)\s+(exibe|apresenta|permite|salva|sincroniza|envia)\s+(.+)/i);
+  if (m) {
+    const verbo = m[1].toLowerCase();
+    const resto = m[2].trim();
+    return {
+      titulo: fluxo.slice(0, 90),
+      e: `o usuário acessa a funcionalidade citada no chamado`,
+      quando: `o usuário reproduz o fluxo descrito no título do chamado`,
+      entao: `o sistema ${verbo} ${resto}`,
+    };
+  }
+
+  m = fluxo.match(/(?:falha|erro|bug)\s+(?:ao|na|no|em)\s+(.+)/i);
+  if (m) {
+    const acao = m[1].trim();
+    return {
+      titulo: fluxo.slice(0, 90),
+      e: `o usuário acessa a funcionalidade citada no chamado`,
+      quando: `o usuário ${acao.charAt(0).toLowerCase()}${acao.slice(1)}`,
+      entao: `o fluxo é concluído sem o erro descrito no chamado`,
+    };
+  }
+
+  return null;
+}
+
+function tituloCenarioCurto(texto, max = 88) {
+  const t = normalizarTitulo(texto);
+  if (!t || t.length <= max) return t;
+  const corte = t.slice(0, max);
+  const sp = corte.lastIndexOf(' ');
+  return (sp > 40 ? corte.slice(0, sp) : corte).trim();
+}
+
+/**
  * Quando o card só tem título (campos NGF vazios), monta passos a partir do título.
  */
 function passosAPartirDoTitulo(titulo) {
-  const t = limparTexto(titulo);
-  if (!t) return passosParaStepsGherkin('');
+  const parsed = parseTituloParaCenario(titulo);
+  if (parsed) {
+    const out = [];
+    if (parsed.e) out.push(`    E ${parsed.e}`);
+    out.push(`  Quando ${parsed.quando}`);
+    return out;
+  }
 
-  const partes = t.split(/\s*[-–—]\s*/).map((p) => p.trim()).filter(Boolean);
-  const modulo = objetivarFrase(partes[0] || t, 60) || partes[0] || t;
-  const fluxo = partes.length > 1 ? partes.slice(1).join(' ') : t;
-  const fluxoObj = objetivarFrase(fluxo, 70) || objetivarFrase(t, 70);
+  const fluxo = fluxoPrincipalDoTitulo(titulo);
+  if (!fluxo) return [];
 
-  return [
-    `    E o usuário acessa o módulo ${modulo}`,
-    fluxoObj ? `  Quando ${fluxoObj}` : null,
-  ].filter(Boolean);
+  const local = fluxo.match(/(?:no|em|na)\s+(cadastro|tela|módulo|formulário|listagem|laudário|worklist|portal)\s+de\s+(\w+)/i);
+  if (local) {
+    return [
+      `    E o usuário abre ${local[0]}`,
+      `  Quando o usuário executa o fluxo descrito no título do chamado`,
+    ];
+  }
+
+  return [`  Quando o usuário executa o fluxo descrito no título do chamado`];
 }
 
 function entaoAPartirDoTitulo(titulo) {
-  const t = limparTexto(titulo);
-  if (!t) return null;
-  const partes = t.split(/\s*[-–—]\s*/).map((p) => p.trim()).filter(Boolean);
-  const alvo = partes.length > 1 ? partes.slice(1).join(' ') : t;
-  const obj = objetivarFrase(`${alvo} funciona conforme descrito no chamado`, 90);
-  if (!obj) return null;
+  const parsed = parseTituloParaCenario(titulo);
+  if (parsed?.entao) {
+    const { entaoEhVago } = require('./bdd-rigor');
+    if (!entaoEhVago(parsed.entao)) return `  Então ${parsed.entao}`;
+  }
+
+  const fluxo = fluxoPrincipalDoTitulo(titulo);
+  if (!fluxo) return null;
+
+  if (/obrigat[oó]ri[oa]\s+indevidamente|indevidamente/i.test(fluxo)) {
+    const m = fluxo.match(/campo\s+(.+?)\s+obrigat/i);
+    if (m) return `  Então o campo ${m[1].trim()} não é exigido como obrigatório`;
+    return `  Então o campo citado no chamado não é exigido como obrigatório`;
+  }
+
+  if (/n[aã]o\s+(exibe|apresenta|permite|salva)/i.test(fluxo)) {
+    const ev = entaoVerificavel(fluxo);
+    if (ev) return `  Então ${ev}`;
+  }
+
   const { entaoEhVago } = require('./bdd-rigor');
-  if (entaoEhVago(obj)) return null;
-  return `  Então ${obj}`;
+  const ev = entaoVerificavel(`comportamento descrito no chamado é observado: ${fluxo}`);
+  if (ev && !entaoEhVago(ev)) return `  Então ${ev}`;
+  return null;
 }
 
 /**
@@ -1625,6 +1744,9 @@ module.exports = {
   cenarioPrincipalNgf,
   cenariosPrincipalNgf,
   cenariosSmokeAPartirDoTitulo,
+  parseTituloParaCenario,
+  fluxoPrincipalDoTitulo,
+  tituloCenarioCurto,
   entaoDoContexto,
   devCenariosParaPassosE,
   montarDadosIniciais,

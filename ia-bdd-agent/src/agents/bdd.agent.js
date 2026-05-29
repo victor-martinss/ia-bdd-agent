@@ -402,8 +402,10 @@ async function generateBDD(title, item) {
   const forceLlm = process.env.BDD_ASSERTIVE_LLM === '1';
   const llmOn = isLlmEnabled() && process.env.BDD_USE_LLM === '1';
   const ngfRich = ctxTemCamposEstruturados(ctx);
+  const titleOnly =
+    !ngfRich && blocosDev.length === 0 && !!limparTexto(ctx.titulo);
 
-  if (llmOn && llmRefineEnabled() && ngfRich && !forceLlm) {
+  if (llmOn && llmRefineEnabled() && !forceLlm && (ngfRich || titleOnly)) {
     try {
       if (process.env.DEBUG_BITRIX === '1') {
         console.log('[BDD] Refino OpenAI sobre rascunho estruturado (bdd-refine.txt)');
