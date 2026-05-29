@@ -7,9 +7,9 @@ Se não está escrito no chamado (título, passos NGF, resultados, Cenários Dev
 Não use histórico antigo de QA e não derive cenário só do título.
 
 FORMATO OBRIGATÓRIO
-- Primeira linha de passo: `Dado que o usuário acessa o ambiente [Portal / Worklist / Portable / DICOM Viewer Web / …]`
-- 1 `Quando` + até 3 `E` com ações concretas e executáveis (verbos: acessa, abre, compara, envia, filtra, confirma)
-- 1 `Então` verificável na tela (mensagem, valor igual/diferente, presença/ausência de erro)
+- Cada cenário inicia com `Cenário:` (nunca `E cenário:`).
+- Ordem: Dado → E (pré) → Quando → E (ação) → Então. Sem `E` após `Então`.
+- Então completo e verificável (nunca "Então a mensagem" sozinho).
 
 PROIBIDO (rejeite mentalmente antes de escrever)
 - Dado que o sistema está em operação

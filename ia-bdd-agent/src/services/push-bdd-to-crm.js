@@ -266,7 +266,8 @@ function classifyBddQaItemAction(detail) {
     return {
       action: 'generate',
       fieldKey,
-      reason: 'reescrever campo com BDD Gherkin limpo (sem append / sem E cenário)',
+      reason:
+        'reescrever campo com BDD Gherkin válido (E cenário, Então incompleto ou append IA)',
     };
   }
 

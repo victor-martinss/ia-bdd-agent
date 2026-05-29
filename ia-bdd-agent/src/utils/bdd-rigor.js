@@ -25,6 +25,8 @@ const E_INVALIDO =
 function entaoEhVago(texto) {
   const t = limparTexto(String(texto || '').replace(/^ent[aã]o\s+/i, ''));
   if (!t || t.length < 6) return true;
+  if (/^a\s+mensagem$/i.test(t)) return true;
+  if (/^a\s+(tela|mensagem)\s*$/i.test(t)) return true;
   return VAGO_ENTAO.test(t);
 }
 
@@ -183,6 +185,7 @@ function rigorizarFeatureBdd(feature, ctx = {}) {
     }
 
     if (/^\s*e\s+/i.test(t) && !/^\s*então/i.test(t)) {
+      if (temEntaoNoCenario) continue;
       if (linhaEInvalida(t) || passoEhVago(t)) continue;
       if (/^e\s+o\s+usu[aá]rio\s+informa dado inv[aá]lid/i.test(t)) continue;
       if (/^e\s+o\s+usu[aá]rio\s+(ao|após|antes|quando)\s+/i.test(t)) continue;

@@ -1,20 +1,28 @@
-Você escreve testes de INTEGRAÇÃO entre sistemas Mobilemed (dados devem ser consistentes entre módulos).
+Você escreve testes de INTEGRAÇÃO entre sistemas Mobilemed (dados e fluxos entre módulos).
 
-Típico: Worklist ↔ Portal, envio de exame, protocolo/CPF/paciente, sincronização, PACS.
+Típico: Worklist ↔ Portal, Portable ↔ Leorad, laudário ↔ fila, autenticação ao alternar telas.
 
 {{VOCAB}}
 
-DIRETRIZES
-- Funcionalidade: cite os dois (ou mais) sistemas — ex.: "Worklist — Portal — protocolo do exame".
-- Em cada cenário, deixe explícito ONDE o testador anota/confere o dado (Worklist vs Portal).
-- Passos sugeridos quando aplicável:
-  - anotar valor no sistema A
-  - abrir mesmo exame/paciente no sistema B
-  - comparar protocolo, status, CPF ou campo citado no chamado
-- Então sempre sobre igualdade ou divergência observável entre sistemas.
-- Não invente integrações não mencionadas no chamado.
+FORMATO OBRIGATÓRIO (Gherkin pt-BR)
+Funcionalidade: [sistemas envolvidos]
+Cenário: [objetivo verificável]
+  Dado que o usuário acessa o ambiente [Portable / Portal / Worklist / …]
+  E o usuário [pré-condição concreta citada no chamado]
+  Quando o usuário [ação principal]
+  E o usuário [até 2 complementos objetivos]
+  Então [validação observável completa — mensagem, dado igual, estado na tela]
 
-FORMATO: somente Gherkin em português.
+PROIBIDO
+- Linha `E cenário:` — use sempre `Cenário:` em linha própria.
+- `Então a mensagem` sem completar o texto da mensagem ou efeito.
+- Linhas `E` após `Então` no mesmo cenário.
+- Inventar integração, popup ou mensagem ausente no chamado.
+
+DIRETRIZES
+- Deixe explícito ONDE o testador age (Worklist, laudário, Portable, Portal).
+- Então sobre autenticação, persistência de laudo, visibilidade do exame, sincronização de dados.
+- Um cenário = um objetivo de teste; se houver múltiplas validações, use vários Então ou cenários separados.
 
 Chamado:
 {{INPUT}}

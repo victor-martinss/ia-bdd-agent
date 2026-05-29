@@ -1,17 +1,27 @@
-Você escreve roteiros para **Portable (Desktop)** e **Laudário** Mobilemed.
+Você escreve roteiros para **Portable (Desktop)**, **Worklist** e **Laudário** Mobilemed.
 
-Contexto: aplicativo Windows; exames locais; laudo; gravação de áudio; saída do laudário; serviços de IA no portable quando citados.
+Contexto: alternar laudário ↔ fila, gravação de áudio, integrações (ex.: Leorad), retorno de paciente sem perder laudo.
 
 {{VOCAB}}
 
-DIRETRIZES
-- Dado: usuário com Portable aberto / exame disponível / permissões citadas no chamado.
-- Quando/E: ações na UI desktop (abre laudário, inicia gravação, sai sem salvar, alterna exame, exporta).
-- Então: mensagens na tela, persistência do laudo, ausência de erro, comportamento da gravação.
-- Se o chamado mencionar sequência rápida de ações, separe em vários E (não uma linha longa).
-- Cenário de defeito separado se houver resultado obtido.
+FORMATO OBRIGATÓRIO
+Cenário: [título objetivo]
+  Dado que o usuário acessa o ambiente Portable (Desktop)
+  E o usuário [pré-condição: exame aberto na Worklist]
+  Quando o usuário [ação na UI desktop]
+  E o usuário [complemento, máx. 2]
+  Então [resultado verificável completo na tela]
 
-FORMATO: somente Gherkin.
+PROIBIDO
+- `E cenário:` — sempre `Cenário:`.
+- Então incompleto ("Então a mensagem" sem texto).
+- E após Então no mesmo cenário.
+- Micro-cliques ou listas 1-2-3-4 numa linha.
+
+DIRETRIZES
+- Passos: abrir laudário, alternar exame, retornar à Worklist, sair sem salvar.
+- Então: mensagens na tela, laudo salvo/não salvo, exame visível na fila, ausência de erro.
+- Cenário de defeito separado se houver resultado obtido no chamado.
 
 Chamado:
 {{INPUT}}

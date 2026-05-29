@@ -187,7 +187,7 @@ function stripTextoAdministrativo(texto) {
 
   t = t
     .replace(
-      /\b(tarefa\s+aberta|evid[eê]ncias?|enviadas?\s+por|solicita(?:do)?|pela?\s+[\w.]+\s*NQ|inf\s+e\s+evid[eê]ncias?).*$/gi,
+      /\b(tarefa\s+aberta|evid[eê]ncias?|enviadas?\s+por|solicitado\s+por|pela?\s+[\w.]+\s*NQ|inf\s+e\s+evid[eê]ncias?).*$/gi,
       ''
     )
     .replace(/\b(isabelly|mobilemed)\s*\w*$/gi, '')
@@ -239,12 +239,21 @@ function entaoVerificavel(texto) {
 
   t = t
     .replace(/^é\s+exibid[oa]\s+(a\s+)?mensagem\s*:?\s*/i, 'exibe a mensagem ')
+    .replace(/^n[aã]o\s+solicitar\s+/i, 'nenhuma ')
+    .replace(/^n[aã]o\s+deve\s+solicitar\s+/i, 'nenhuma ')
     .replace(/^deve\s+ser\s+/i, 'é ')
     .replace(/^deve\s+/i, '')
     .replace(/^deverá\s+/i, '')
     .replace(/^o\s+sistema\s+deve\s+/i, '')
     .replace(/^o\s+sistema\s+/i, '')
     .trim();
+
+  if (/^nenhum(a|as|os)?\s+/i.test(t) && !/\b(é|são|está|exibe|apresenta|permanece|continua|solicit)\b/i.test(t)) {
+    t = t.replace(/[.!?]+$/g, '').trim();
+    if (/autentic|login|sess[aã]o|credencial/i.test(t)) {
+      t = `${t} é solicitada`;
+    }
+  }
 
   t = objetivarFrase(t, 150);
   if (!t) return '';

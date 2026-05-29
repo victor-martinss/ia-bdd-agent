@@ -63,12 +63,24 @@ function fieldHasIaAutomationArtifacts(text) {
   return false;
 }
 
-/** BDD gerado pela IA fora do padrão Gherkin (ex.: linhas "E cenário:"). */
+/** BDD gerado pela IA fora do padrão Gherkin (ex.: linhas "E cenário:", Então incompleto). */
 function fieldHasMalformedLlmGherkin(text) {
   const t = normalizeNewlines(text);
   if (!t.trim()) return false;
   if (/^\s*E\s+cen[aá]rio\s*:/im.test(t)) return true;
   if (!/^\s*Cen[aá]rio\s*:/im.test(t) && /cen[aá]rio\s*:/i.test(t)) return true;
+  if (/^\s*ent[aã]o\s+a\s+mensagem\s*$/im.test(t)) return true;
+  if (/^\s*ent[aã]o\s+o\s+(sistema|comportamento|resultado)\s*$/im.test(t)) return true;
+
+  if (/funcionalidade\s*:/i.test(t) || /^\s*cen[aá]rio\s*:/im.test(t)) {
+    try {
+      const { validarEstruturaFeatureGherkin } = require('./bdd-gherkin-structure');
+      const { ok } = validarEstruturaFeatureGherkin(t);
+      if (!ok) return true;
+    } catch {
+      /* ignore */
+    }
+  }
   return false;
 }
 

@@ -6,6 +6,14 @@ const {
 } = require('./bdd-gherkin');
 const { entaoEhVago, extrairEntaoDoTexto } = require('./bdd-rigor');
 
+/** Quebra resultado esperado em critérios individuais para Então. */
+function splitCriteriosResultado(texto) {
+  return String(texto || '')
+    .split(/(?:[;\n]|(?<=[.!?])\s+)/)
+    .map((p) => p.replace(/[.!?]+$/g, '').trim())
+    .filter((p) => p.length >= 8);
+}
+
 /**
  * Extrai critérios de validação assertivos a partir dos campos do chamado.
  * @param {object} ctx
@@ -31,9 +39,8 @@ function extrairValidacoesExatas(ctx) {
   };
 
   if (ctx.resultadoEsperado) {
-    const partes = String(ctx.resultadoEsperado).split(/[;\n]+/).map((p) => p.trim());
+    const partes = splitCriteriosResultado(ctx.resultadoEsperado);
     for (const p of partes) add('resultado esperado', p);
-    if (partes.length === 1) add('resultado esperado', ctx.resultadoEsperado);
   }
 
   if (ctx.resultadoObtido) {
@@ -112,6 +119,7 @@ function formatarValidacoesParaPrompt(ctx) {
 }
 
 module.exports = {
+  splitCriteriosResultado,
   extrairValidacoesExatas,
   entaoAssertivoDoContexto,
   formatarValidacoesParaPrompt,

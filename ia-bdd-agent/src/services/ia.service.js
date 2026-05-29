@@ -105,7 +105,7 @@ async function runOpenAI(prompt) {
       {
         role: 'system',
         content:
-          'Você é QA Mobilemed. Escreve roteiros de teste manual em Gherkin (pt-BR): passos detalhados com o usuário + ação na tela (Worklist, Portal, Portable, Laudário, DICOM Viewer) e Então verificável. Vocabulário técnico do produto; sem meta-texto do Bitrix; sem explicações fora do Gherkin.',
+          'Você é QA Mobilemed. Escreve Gherkin (pt-BR) executável: cada cenário com linha "Cenário:", Dado/Quando/Então na ordem correta, Então completo e verificável. Nunca use "E cenário:". Nunca coloque "E" após "Então". Use só fatos do chamado; sem meta-texto.',
       },
       { role: 'user', content: prompt },
     ],

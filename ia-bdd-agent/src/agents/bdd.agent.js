@@ -203,9 +203,32 @@ function buildStructuredBdd(title, ctx) {
 
 function finalizarFeatureBdd(feature, ctx, meta = {}) {
   if (!feature) return feature;
+  const { repararFeatureGherkinDesconexo } = require('../utils/bdd-gherkin-structure');
+  const reparado = repararFeatureGherkinDesconexo(feature, ctx);
   const { rigorizarFeatureBdd } = require('../utils/bdd-rigor');
-  const rigor = rigorizarFeatureBdd(feature, ctx);
+  const rigor = rigorizarFeatureBdd(reparado, ctx);
   return planificarFeatureBdd(rigor, ctx, meta);
+}
+
+function llmRefineEnabled() {
+  if (process.env.BDD_LLM_REFINE === '0') return false;
+  if (process.env.BDD_LLM_REFINE === '1') return true;
+  return isLlmEnabled();
+}
+
+async function generateBddRefineViaLlm(title, ctx, draft, meta = {}) {
+  const input = [
+    montarInputLlm(title, ctx),
+    '',
+    '--- RASCUNHO (corrigir estrutura e completar Então; não inventar fatos) ---',
+    draft.trim(),
+  ].join('\n');
+  const { prompt, resolved } = buildBddPrompt(input, { ctx, title, forceMode: 'refine' });
+  if (process.env.DEBUG_BITRIX === '1') {
+    console.log(`[BDD] Refino: ${resolved.file} — ${resolved.label}`);
+  }
+  const raw = await runIA(prompt);
+  return filtrarRespostaBdd(raw, ctx, meta);
 }
 
 function montarInputLlm(title, ctx) {
@@ -292,7 +315,7 @@ function montarInputLlm(title, ctx) {
 const PASSOS_BLOQUEADOS_LLM =
   /passos?\s+para\s+reproduzir|cen[aá]rio\s+principal\s+foi\s+executado|fluxo\s+[eé]\s+conclu[ií]do|sistema\s+est[aá]\s+em\s+opera[çc][aã]o|executa\s+o\s+fluxo\s+principal|alinhad[oa]\s+[àa]\s+regra\s+de\s+neg[oó]cio|time\s+analisou|melhoria\s+for\s+implementada|cen[aá]rio\s+do\s+dev\s+prev[eê]/i;
 
-function bddLlmOutputValido(texto) {
+function bddLlmOutputValido(texto, ctx = {}) {
   if (!texto || typeof texto !== 'string') return false;
   const t = texto.trim();
   if (t.length < 40) return false;
@@ -306,7 +329,15 @@ function bddLlmOutputValido(texto) {
   ) {
     return false;
   }
-  return true;
+  if (/^\s*E\s+cen[aá]rio\s*:/im.test(t)) return false;
+
+  const { repararFeatureGherkinDesconexo, validarEstruturaFeatureGherkin } = require('../utils/bdd-gherkin-structure');
+  const reparado = repararFeatureGherkinDesconexo(t, ctx);
+  const { ok, motivos } = validarEstruturaFeatureGherkin(reparado);
+  if (!ok && process.env.DEBUG_BITRIX === '1') {
+    console.warn('[BDD] estrutura inválida:', motivos.slice(0, 4).join('; '));
+  }
+  return ok;
 }
 
 async function generateBddViaLlm(title, ctx, meta = {}) {
@@ -363,46 +394,53 @@ async function generateBDD(title, item) {
 
   const blocosDev = parseCenariosDevBlocos(ctx.cenariosTesteDev);
   ctx._ordemDev = blocosDev.map((b) => b.title || '').filter(Boolean);
+  const meta = { qtdDev: blocosDev.length };
 
   const structured = () => buildStructuredBdd(title, ctx);
+  let feature = structured();
 
   const forceLlm = process.env.BDD_ASSERTIVE_LLM === '1';
-  const llmExplicit = process.env.BDD_USE_LLM === '1';
-  const preferStructured =
-    process.env.BDD_PREFER_STRUCTURED === '1' ||
-    (process.env.BDD_PREFER_STRUCTURED !== '0' &&
-      process.env.BDD_ASSERTIVE_MODE !== '0' &&
-      !forceLlm) ||
-    (blocosDev.length > 0 && !isLlmEnabled()) ||
-    (blocosDev.length > 0 && !forceLlm);
+  const llmOn = isLlmEnabled() && process.env.BDD_USE_LLM === '1';
+  const ngfRich = ctxTemCamposEstruturados(ctx);
 
-  if (preferStructured && blocosDev.length > 0) {
-    return structured();
-  }
-
-  if (blocosDev.length === 0 && preferStructured) {
-    return structured();
-  }
-
-  if (!isLlmEnabled() || !llmExplicit) {
-    return structured();
-  }
-
-  try {
-    const fromLlm = await generateBddViaLlm(title, ctx, { qtdDev: blocosDev.length });
-    if (bddLlmOutputValido(fromLlm)) {
-      return fromLlm;
+  if (llmOn && llmRefineEnabled() && ngfRich && !forceLlm) {
+    try {
+      if (process.env.DEBUG_BITRIX === '1') {
+        console.log('[BDD] Refino OpenAI sobre rascunho estruturado (bdd-refine.txt)');
+      }
+      const refined = await generateBddRefineViaLlm(title, ctx, feature, meta);
+      if (bddLlmOutputValido(refined, ctx)) {
+        return refined;
+      }
+      console.warn('[BDD] refino LLM com estrutura inválida — mantendo gerador estruturado');
+    } catch (e) {
+      console.warn(
+        `[BDD] refino LLM falhou — gerador estruturado: ${e.message || e}`
+      );
     }
-    if (fromLlm && fromLlm.trim()) {
-      console.warn('[BDD] resposta OpenAI/LLM fora do padrão — fallback estruturado');
-    }
-  } catch (e) {
-    console.warn(
-      `[BDD] IA (${process.env.BDD_AI_PROVIDER || 'auto'}) falhou — fallback estruturado: ${e.message || e}`
-    );
   }
 
-  return structured();
+  if (blocosDev.length > 0 && process.env.BDD_PREFER_STRUCTURED !== '0' && !forceLlm) {
+    return feature;
+  }
+
+  if (llmOn && forceLlm) {
+    try {
+      const fromLlm = await generateBddViaLlm(title, ctx, meta);
+      if (bddLlmOutputValido(fromLlm, ctx)) {
+        return fromLlm;
+      }
+      if (fromLlm && fromLlm.trim()) {
+        console.warn('[BDD] resposta OpenAI/LLM fora do padrão — fallback estruturado');
+      }
+    } catch (e) {
+      console.warn(
+        `[BDD] IA (${process.env.BDD_AI_PROVIDER || 'auto'}) falhou — fallback estruturado: ${e.message || e}`
+      );
+    }
+  }
+
+  return feature;
 }
 
 function filtrarRespostaBdd(texto, ctx = {}, meta = {}) {

@@ -55,6 +55,10 @@ const PROMPT_CATALOG = {
     file: 'bdd-objetivo.txt',
     label: 'Roteiro objetivo anti-alucinação',
   },
+  refine: {
+    file: 'bdd-refine.txt',
+    label: 'Refino estrutural do rascunho Gherkin',
+  },
 };
 
 function listPromptModes() {
@@ -136,6 +140,13 @@ function detectPromptMode(ctx, title) {
     return 'defeito';
   }
 
+  if (
+    /\bleorad\b/i.test(t) ||
+    (/\bportable\b/i.test(t) && /\b(integr|autentic|fila|worklist|laud[aá]rio)\b/i.test(t))
+  ) {
+    return 'integracao';
+  }
+
   if (ctx.qaHistorico?.isRetornoQa || /\b(reprov|retorn|regress)\b/i.test(t)) {
     return 'regressao';
   }
@@ -194,7 +205,7 @@ function limpar(s) {
  * @returns {{ file: string, mode: string, label: string, path: string }}
  */
 function resolveBddPrompt(hint = {}) {
-  const { ctx = {}, title = '' } = hint;
+  const { ctx = {}, title = '', forceMode = null } = hint;
 
   const forcedFile = (process.env.BDD_PROMPT_FILE || '').trim();
   if (forcedFile) {
@@ -207,7 +218,7 @@ function resolveBddPrompt(hint = {}) {
     };
   }
 
-  const forcedMode = (process.env.BDD_PROMPT_MODE || '').trim().toLowerCase();
+  const forcedMode = (forceMode || process.env.BDD_PROMPT_MODE || '').trim().toLowerCase();
   let mode = 'default';
 
   if (forcedMode && forcedMode !== 'auto') {
