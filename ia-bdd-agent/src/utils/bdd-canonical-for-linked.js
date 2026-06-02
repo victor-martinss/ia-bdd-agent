@@ -2,10 +2,8 @@
  * BDD canônico para replicar nos cards QA atrelados (mesma quantidade/conteúdo do pai).
  */
 const { flattenItem } = require('../agents/parser');
-const {
-  qaBddFieldTextFromFlat,
-  cleanGherkinForCrmField,
-} = require('../services/push-bdd-to-crm');
+const { qaBddFieldTextFromFlat } = require('../services/push-bdd-to-crm');
+const { cleanGherkinForCrmField } = require('./bdd-crm-merge');
 const { parseFeatureEmCenarios } = require('./bdd-scenario-planner');
 
 function contarCenariosGherkin(text) {
