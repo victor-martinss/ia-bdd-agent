@@ -656,8 +656,34 @@ function entityTypeIdSync() {
   return Number.isFinite(n) && n > 0 ? n : 1276;
 }
 
+/**
+ * SPAs a consultar para vínculos (filho / card QA) de um item.
+ * @param {Record<string, unknown> | null} [detail]
+ */
+function entityTypeIdCandidatesForItem(detail = null) {
+  let primary = null;
+  if (detail && typeof detail === 'object') {
+    primary =
+      Number.parseInt(String(detail._entityTypeId || detail.entityTypeId || ''), 10) ||
+      null;
+    if (!primary) {
+      try {
+        const { flattenCrmItem } = require('./crm-qa-stages');
+        const flat = flattenCrmItem(detail);
+        primary = Number.parseInt(String(flat.entityTypeId || ''), 10) || null;
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  if (!primary && runtimeEntityTypeIdOverride) primary = runtimeEntityTypeIdOverride;
+  return buildEntityTypeIdCandidates(primary ?? undefined);
+}
+
 module.exports = {
   getEntityTypeId,
+  entityTypeIdCandidatesForItem,
+  buildEntityTypeIdCandidates,
   setRuntimeEntityTypeIdOverride,
   clearRuntimeEntityTypeIdOverride,
   /** @deprecated use getEntityTypeId() — mantido para scripts que esperam número síncrono */

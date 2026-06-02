@@ -3,6 +3,7 @@
  */
 const { flattenItem } = require('../agents/parser');
 const { parentIdFromItem, listChildCrmItemIds } = require('../services/crm-item-links');
+const { entityTypeIdCandidatesForItem } = require('../services/bitrix.service');
 const { listLinkedQaCrmItemIds } = require('../services/push-bdd-to-qa-linked-crm');
 const {
   listLinkedTaskIdsForCrmItem,
@@ -38,9 +39,15 @@ async function discoverBddLinkedTargets(crmItemId, detail = null) {
   let linkedQaCrm = [];
   let linkedBitrixTaskIds = [];
 
-  if (etId && process.env.BITRIX_PUSH_BDD_TO_LINKED_CRM_ITEMS !== '0') {
+  if (process.env.BITRIX_PUSH_BDD_TO_LINKED_CRM_ITEMS !== '0') {
     try {
-      childCrmIds = await listChildCrmItemIds(crmItemId, etId);
+      const childSet = new Set();
+      for (const candidateEt of entityTypeIdCandidatesForItem(detail || {})) {
+        for (const id of await listChildCrmItemIds(crmItemId, candidateEt)) {
+          childSet.add(id);
+        }
+      }
+      childCrmIds = [...childSet];
     } catch {
       childCrmIds = [];
     }

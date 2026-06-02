@@ -1,6 +1,6 @@
 require('../../load-env');
 const axios = require('axios');
-const { getEntityTypeId, getTaskDetail } = require('./bitrix.service');
+const { getTaskDetail, entityTypeIdCandidatesForItem } = require('./bitrix.service');
 const {
   pushBddToCrmCenariosQa,
   bddPodePublicarNoCrm,
@@ -51,6 +51,11 @@ function pickLinkFieldValues(flat, suffixes) {
   return out;
 }
 
+const CROSS_SPA_LINK_FIELDS = {
+  externo: ['ufCrm94NgfIdExterno', 'ufCrm100NgfIdExterno'],
+  chamado: ['ufCrm94NgfIdDoChamado', 'ufCrm100NgfIdDoChamado'],
+};
+
 function buildLinkFilters(flat, sourceId) {
   const filters = [];
   const sid = String(sourceId);
@@ -58,19 +63,22 @@ function buildLinkFilters(flat, sourceId) {
   const externo = pickLinkFieldValues(flat, ['idexterno', 'id_externo']);
   const chamado = pickLinkFieldValues(flat, ['iddochamado', 'id_do_chamado', 'idchamado']);
 
-  for (const { key, value } of externo) {
-    filters.push({ [key]: value });
-  }
-  for (const { key, value } of chamado) {
-    filters.push({ [key]: value });
+  const externoVals = new Set(externo.map((e) => e.value));
+  for (const val of externoVals) {
+    for (const key of CROSS_SPA_LINK_FIELDS.externo) {
+      filters.push({ [key]: val });
+    }
   }
 
-  for (const { key } of chamado) {
-    filters.push({ [key]: sid });
+  const chamadoVals = new Set(chamado.map((e) => e.value));
+  for (const val of chamadoVals) {
+    for (const key of CROSS_SPA_LINK_FIELDS.chamado) {
+      filters.push({ [key]: val });
+    }
   }
-  if (!chamado.length) {
-    filters.push({ ufCrm94NgfIdDoChamado: sid });
-    filters.push({ ufCrm100NgfIdDoChamado: sid });
+
+  for (const key of CROSS_SPA_LINK_FIELDS.chamado) {
+    filters.push({ [key]: sid });
   }
 
   return filters;
@@ -107,28 +115,31 @@ async function listCrmItemsByFilter(entityTypeId, filter) {
  * @param {Record<string, unknown> | null} [detail]
  */
 async function listLinkedQaCrmItemIds(sourceItemId, detail = null) {
-  const etId = await getEntityTypeId();
-  const qaStageIds = await resolveQaStageIds(etId);
-  if (!qaStageIds.length) return [];
-
-  const flat = flattenCrmItem(detail || (await getTaskDetail(sourceItemId)));
-  const stageFilterRaw = buildStageFilter(qaStageIds);
-  const stageFilter = {};
-  if (stageFilterRaw.stageId) stageFilter.stageId = stageFilterRaw.stageId;
-  else if (stageFilterRaw['@stageId']) stageFilter['@stageId'] = stageFilterRaw['@stageId'];
-
+  const srcDetail = detail || (await getTaskDetail(sourceItemId));
+  const flat = flattenCrmItem(srcDetail);
+  const entityTypeIds = entityTypeIdCandidatesForItem(srcDetail);
   const linkFilters = buildLinkFilters(flat, sourceItemId);
   const found = new Map();
 
-  for (const link of linkFilters) {
-    const filter = { ...link, ...stageFilter };
-    const items = await listCrmItemsByFilter(etId, filter);
-    for (const it of items) {
-      const id = Number(it.id ?? it.ID);
-      if (!Number.isFinite(id) || id === Number(sourceItemId)) continue;
-      const stageId = String(it.stageId || it.STAGE_ID || '');
-      if (await isQaStageId(stageId, etId)) {
-        found.set(id, { id, stageId, title: it.title || it.TITLE });
+  for (const etId of entityTypeIds) {
+    const qaStageIds = await resolveQaStageIds(etId);
+    if (!qaStageIds.length) continue;
+
+    const stageFilterRaw = buildStageFilter(qaStageIds);
+    const stageFilter = {};
+    if (stageFilterRaw.stageId) stageFilter.stageId = stageFilterRaw.stageId;
+    else if (stageFilterRaw['@stageId']) stageFilter['@stageId'] = stageFilterRaw['@stageId'];
+
+    for (const link of linkFilters) {
+      const filter = { ...link, ...stageFilter };
+      const items = await listCrmItemsByFilter(etId, filter);
+      for (const it of items) {
+        const id = Number(it.id ?? it.ID);
+        if (!Number.isFinite(id) || id === Number(sourceItemId)) continue;
+        const stageId = String(it.stageId || it.STAGE_ID || '');
+        if (await isQaStageId(stageId, etId)) {
+          found.set(`${etId}:${id}`, { id, entityTypeId: etId, stageId, title: it.title || it.TITLE });
+        }
       }
     }
   }
@@ -152,10 +163,14 @@ async function pushBddToQaLinkedCrmItems(sourceItemId, bdd, options = {}) {
     return { skipped: true, updated: 0, itemIds: [], skippedAlreadyFilled: 0, failed: 0 };
   }
 
-  const etId = await getEntityTypeId();
   const srcDetail = detail || (await getTaskDetail(sourceItemId));
+  const srcEtId =
+    Number.parseInt(
+      String(srcDetail._entityTypeId || srcDetail.entityTypeId || ''),
+      10
+    ) || entityTypeIdCandidatesForItem(srcDetail)[0];
   const srcStage = srcDetail && (srcDetail.stageId || srcDetail.STAGE_ID);
-  const inDev = srcStage && (await isDevStageId(String(srcStage), etId));
+  const inDev = srcStage && srcEtId && (await isDevStageId(String(srcStage), srcEtId));
 
   if (inDev && process.env.BITRIX_PUSH_BDD_ON_DEV_CARD !== '1') {
     if (!quiet) {

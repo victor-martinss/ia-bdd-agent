@@ -2,7 +2,9 @@ require('../../load-env');
 const axios = require('axios');
 const {
   getEntityTypeId,
+  getTaskDetail,
   getSpaSymbolCodeShortForEntityTypeId,
+  entityTypeIdCandidatesForItem,
 } = require('./bitrix.service');
 const {
   truncarParaCampoUf,
@@ -400,8 +402,14 @@ async function pushBddToLinkedCrmChildItems(crmItemId, bdd, options = {}) {
     return { skipped: true, updated: 0, itemIds: [] };
   }
 
-  const etId = await getEntityTypeId();
-  const childIds = await listChildCrmItemIdsForParent(crmItemId, etId);
+  const srcDetail = detail || (await getTaskDetail(crmItemId));
+  const childIdSet = new Set();
+  for (const etId of entityTypeIdCandidatesForItem(srcDetail)) {
+    for (const id of await listChildCrmItemIdsForParent(crmItemId, etId)) {
+      childIdSet.add(id);
+    }
+  }
+  const childIds = [...childIdSet];
   if (!childIds.length) {
     return { skipped: true, reason: 'nenhum item CRM filho', updated: 0, itemIds: [] };
   }
