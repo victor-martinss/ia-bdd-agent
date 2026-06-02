@@ -10,6 +10,7 @@ const {
   shouldPushBddToMainCard,
   pushBddToAllLinkedDestinations,
 } = require('../utils/bdd-push-routing');
+const { resolveCanonicalBddForLinked } = require('../utils/bdd-canonical-for-linked');
 const { isQaStageId, isDevStageId } = require('../services/crm-qa-stages');
 const { getEntityTypeId } = require('../services/bitrix.service');
 const { generateBDD } = require('../agents/bdd.agent');
@@ -188,9 +189,28 @@ async function runBitrixBddCycle(packageRoot, options = {}) {
         crm.skipped += 1;
       }
 
-      const linkedPush = await pushBddToAllLinkedDestinations(task.id, bdd, detail, {
-        quiet,
-      });
+      const canonical = resolveCanonicalBddForLinked(detail, bdd);
+      const bddAtrelados = canonical.bdd;
+      if (
+        !quiet &&
+        targets.hasLinkedDestinations &&
+        canonical.source !== 'gerado'
+      ) {
+        console.log(
+          `[CRM] BDD canônico: ${canonical.nCanonical} cenário(s) (${canonical.source}; pai=${canonical.nParent}, gerado=${canonical.nGenerated}) → replicar nos atrelados`
+        );
+      } else if (!quiet && targets.hasLinkedDestinations && canonical.nCanonical > 0) {
+        console.log(
+          `[CRM] BDD canônico: ${canonical.nCanonical} cenário(s) → replicar nos atrelados`
+        );
+      }
+
+      const linkedPush = await pushBddToAllLinkedDestinations(
+        task.id,
+        bddAtrelados,
+        detail,
+        { quiet }
+      );
       const qaLinkResult = linkedPush.qa;
       const childCrmResult = linkedPush.child;
       const linkResult = linkedPush.tasks;

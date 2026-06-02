@@ -9,6 +9,7 @@ const {
   shouldPushBddToMainCard,
   pushBddToAllLinkedDestinations,
 } = require('../utils/bdd-push-routing');
+const { resolveCanonicalBddForLinked } = require('../utils/bdd-canonical-for-linked');
 
 const FIXTURES_PATH = path.join(__dirname, '../../fixtures/bdd-scenarios.json');
 const MAX_BODY = 2 * 1024 * 1024;
@@ -135,9 +136,10 @@ async function handle(req, res) {
           });
         }
         if (body.pushToLinkedTasks !== false) {
+          const canonical = resolveCanonicalBddForLinked(item, bdd);
           payload.linkedPush = await pushBddToAllLinkedDestinations(
             idCheck.id,
-            bdd,
+            canonical.bdd,
             item,
             { quiet: true }
           );
@@ -176,9 +178,10 @@ async function handle(req, res) {
           });
         }
         if (body.pushToLinkedTasks !== false) {
+          const canonical = resolveCanonicalBddForLinked(fx.item, bdd);
           payload.linkedPush = await pushBddToAllLinkedDestinations(
             idCheck.id,
-            bdd,
+            canonical.bdd,
             fx.item,
             { quiet: true }
           );

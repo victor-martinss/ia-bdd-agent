@@ -8,6 +8,14 @@ require(path.join(__dirname, '../load-env'));
 
 const { runBddForSingleCrmItem } = require('../src/services/bdd-from-item-runner');
 
+/** Garante espelhamento pai→QA com BITRIX_SKIP desligado no batch. */
+if (!process.env.BITRIX_LINKED_BDD_MIRROR_PARENT) {
+  process.env.BITRIX_LINKED_BDD_MIRROR_PARENT = '1';
+}
+if (!process.env.BITRIX_LINKED_BDD_ALWAYS_SYNC) {
+  process.env.BITRIX_LINKED_BDD_ALWAYS_SYNC = '1';
+}
+
 const PKG = path.join(__dirname, '..');
 
 const DEFAULT_IDS = [40, 86, 128, 142, 264, 356];

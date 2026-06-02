@@ -416,7 +416,11 @@ async function pushBddToLinkedCrmChildItems(crmItemId, bdd, options = {}) {
 
   let updated = 0;
   for (const childId of childIds) {
-    const r = await pushBddToCrmCenariosQa(childId, bdd, { quiet, detail });
+    const r = await pushBddToCrmCenariosQa(childId, bdd, {
+      quiet,
+      detail,
+      linkedSync: true,
+    });
     if (r.ok) {
       updated += 1;
       if (!quiet) {

@@ -344,7 +344,9 @@ async function pushBddToCrmCenariosQa(taskId, bdd, options = {}) {
   const flat = flattenItem(detail || {});
   const { text: existingQaText } = qaBddFieldTextFromFlat(flat);
   const marker = defaultAppendMarker();
+  const linkedSync = options.linkedSync === true;
   const podeMesclarAbaixoMarcador =
+    !linkedSync &&
     !cleanCrmWriteEnabled() &&
     mergeFeatureEnabled() &&
     existingQaText &&
@@ -360,6 +362,7 @@ async function pushBddToCrmCenariosQa(taskId, bdd, options = {}) {
       );
     }
   } else if (
+    !linkedSync &&
     mergeFeatureEnabled() &&
     existingQaText &&
     process.env.BITRIX_BDD_APPEND_WITHOUT_MARKER === '1'

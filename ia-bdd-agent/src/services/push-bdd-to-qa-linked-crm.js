@@ -6,7 +6,13 @@ const {
   bddPodePublicarNoCrm,
   classifyBddQaItemAction,
   bddQaStorageFirstFilledFieldKey,
+  qaBddFieldTextFromFlat,
 } = require('./push-bdd-to-crm');
+const { flattenItem } = require('../agents/parser');
+const {
+  linkedCardNeedsBddSync,
+  contarCenariosGherkin,
+} = require('../utils/bdd-canonical-for-linked');
 const {
   resolveQaStageIds,
   resolveDevStageIds,
@@ -191,11 +197,18 @@ async function pushBddToQaLinkedCrmItems(sourceItemId, bdd, options = {}) {
   let failedPush = 0;
 
   for (const row of qaItems) {
-    const childDetail = await getTaskDetail(row.id);
+    const childDetail = await getTaskDetail(row.id, {
+      entityTypeId: row.entityTypeId,
+    });
     const classification = classifyBddQaItemAction(childDetail || {});
+    const flatChild = flattenItem(childDetail || {});
+    const { text: linkedExisting } = qaBddFieldTextFromFlat(flatChild);
+    const precisaSync = linkedCardNeedsBddSync(linkedExisting, bdd);
+
     if (
-      classification.action === 'skip_filled' ||
-      classification.action === 'skip_qa_history'
+      !precisaSync &&
+      (classification.action === 'skip_filled' ||
+        classification.action === 'skip_qa_history')
     ) {
       skippedAlreadyFilled += 1;
       if (!quiet) {
@@ -208,9 +221,20 @@ async function pushBddToQaLinkedCrmItems(sourceItemId, bdd, options = {}) {
       }
       continue;
     }
+
+    if (!quiet && precisaSync && classification.action === 'skip_filled') {
+      const nL = contarCenariosGherkin(linkedExisting);
+      const nC = contarCenariosGherkin(bdd);
+      console.log(
+        `📎 Card QA ${row.id}: sincronizando BDD do pai (${nL} → ${nC} cenário(s))`
+      );
+    }
+
     const r = await pushBddToCrmCenariosQa(row.id, bdd, {
       quiet,
       detail: childDetail || srcDetail,
+      entityTypeId: row.entityTypeId,
+      linkedSync: true,
     });
     if (r.ok) {
       updated += 1;
