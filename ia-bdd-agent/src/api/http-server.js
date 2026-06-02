@@ -5,9 +5,10 @@ const { handleBitrixOutgoing } = require('./bitrix-outgoing-handler');
 const { generateBDD } = require('../agents/bdd.agent');
 const { pushBddToCrmCenariosQa } = require('../services/push-bdd-to-crm');
 const {
-  pushBddToLinkedBitrixTasks,
-  pushBddToLinkedCrmChildItems,
-} = require('../services/push-bdd-to-linked-tasks');
+  discoverBddLinkedTargets,
+  shouldPushBddToMainCard,
+  pushBddToAllLinkedDestinations,
+} = require('../utils/bdd-push-routing');
 
 const FIXTURES_PATH = path.join(__dirname, '../../fixtures/bdd-scenarios.json');
 const MAX_BODY = 2 * 1024 * 1024;
@@ -125,7 +126,8 @@ async function handle(req, res) {
       const bdd = await generateBDD(title, item);
       const payload = { bdd, title: title || item.title || null };
       if (idCheck && 'id' in idCheck) {
-        if (body.pushToCrm !== false) {
+        const targets = await discoverBddLinkedTargets(idCheck.id, item);
+        if (body.pushToCrm !== false && shouldPushBddToMainCard(targets)) {
           payload.crmItemId = idCheck.id;
           payload.crmPush = await pushBddToCrmCenariosQa(idCheck.id, bdd, {
             quiet: true,
@@ -133,15 +135,11 @@ async function handle(req, res) {
           });
         }
         if (body.pushToLinkedTasks !== false) {
-          payload.linkedTasksPush = await pushBddToLinkedBitrixTasks(
+          payload.linkedPush = await pushBddToAllLinkedDestinations(
             idCheck.id,
             bdd,
-            { quiet: true, detail: item }
-          );
-          payload.linkedCrmChildrenPush = await pushBddToLinkedCrmChildItems(
-            idCheck.id,
-            bdd,
-            { quiet: true, detail: item }
+            item,
+            { quiet: true }
           );
         }
       }
@@ -169,7 +167,8 @@ async function handle(req, res) {
         fixtureName: fx.name,
       };
       if (idCheck && 'id' in idCheck) {
-        if (body.pushToCrm !== false) {
+        const targets = await discoverBddLinkedTargets(idCheck.id, fx.item);
+        if (body.pushToCrm !== false && shouldPushBddToMainCard(targets)) {
           payload.crmItemId = idCheck.id;
           payload.crmPush = await pushBddToCrmCenariosQa(idCheck.id, bdd, {
             quiet: true,
@@ -177,15 +176,11 @@ async function handle(req, res) {
           });
         }
         if (body.pushToLinkedTasks !== false) {
-          payload.linkedTasksPush = await pushBddToLinkedBitrixTasks(
+          payload.linkedPush = await pushBddToAllLinkedDestinations(
             idCheck.id,
             bdd,
-            { quiet: true, detail: fx.item }
-          );
-          payload.linkedCrmChildrenPush = await pushBddToLinkedCrmChildItems(
-            idCheck.id,
-            bdd,
-            { quiet: true, detail: fx.item }
+            fx.item,
+            { quiet: true }
           );
         }
       }

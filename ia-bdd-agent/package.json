@@ -16,6 +16,7 @@
     "bdd:crm-sync": "node scripts/sync-bdd-to-bitrix-once.js",
     "bdd": "node index.js",
     "bdd:item": "node scripts/run-bdd-item.js",
+    "bdd:list-reprocess-linked": "node scripts/list-reprocess-linked-parents.js",
     "bitrix:context": "node scripts/bitrix-show-context.js",
     "bitrix:diagnose-linked": "node scripts/diagnose-linked-tasks.js",
     "bdd:prompts": "node scripts/list-bdd-prompts.js",

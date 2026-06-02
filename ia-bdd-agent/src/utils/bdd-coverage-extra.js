@@ -12,8 +12,27 @@ function coverageExtraEnabled() {
 }
 
 function maxCenariosExtras() {
-  const n = Number.parseInt(process.env.BDD_COVERAGE_MAX_EXTRA || '1', 10);
-  return Number.isFinite(n) && n >= 0 ? Math.min(n, 4) : 1;
+  const n = Number.parseInt(process.env.BDD_COVERAGE_MAX_EXTRA || '2', 10);
+  return Number.isFinite(n) && n >= 0 ? Math.min(n, 6) : 2;
+}
+
+/** Máximo de cenários complementares após espelhar todos os blocos Dev. */
+function maxCenariosExtrasAposDev(qtdDev) {
+  const base = maxCenariosExtras();
+  if (qtdDev <= 0) return base;
+  const ratio = Number.parseFloat(process.env.BDD_COVERAGE_EXTRA_RATIO || '0.5');
+  const porRatio =
+    Number.isFinite(ratio) && ratio > 0
+      ? Math.ceil(qtdDev * ratio)
+      : Math.max(1, Math.floor(qtdDev / 2));
+  const minExtra = Number.parseInt(process.env.BDD_COVERAGE_MIN_EXTRA_AFTER_DEV || '1', 10);
+  const minOk = Number.isFinite(minExtra) && minExtra >= 0 ? minExtra : 1;
+  return Math.min(6, Math.max(minOk, porRatio, base));
+}
+
+function coverageExtraAposDevEnabled() {
+  if (process.env.BDD_COVERAGE_EXTRA_AFTER_DEV === '0') return false;
+  return coverageExtraEnabled();
 }
 
 /** Pontua candidatos de cobertura — maior = mais alinhado ao risco do chamado. */
@@ -75,6 +94,7 @@ function textoCamposAnalisados(ctx) {
     ctx.resultadoObtido,
     ctx.evidenceResumoFiltrado || ctx.evidenceResumo,
     ctx.observacoesTriagemFiltrada || ctx.observacoesTriagem,
+    ctx.comentariosTarefaFiltrado || ctx.comentariosTarefa,
   ]
     .filter(Boolean)
     .join('\n')
@@ -126,9 +146,14 @@ function montarCenarioExtra(titulo, ctx, passosTexto, entao, refRelacionada = nu
  */
 function gerarCenariosCoberturaExtra(ctx, blocosDev, nomeFuncionalidade) {
   if (!coverageExtraEnabled()) return [];
-  if (blocosDev.length > 0) return [];
+
+  const qtdDev = (blocosDev || []).length;
+  const comDev = qtdDev > 0;
+
+  if (comDev && !coverageExtraAposDevEnabled()) return [];
 
   if (
+    !comDev &&
     limparTexto(ctx.passosFiltrados || ctx.passos) &&
     ctx.resultadoObtido &&
     ctx.resultadoEsperado
@@ -136,9 +161,9 @@ function gerarCenariosCoberturaExtra(ctx, blocosDev, nomeFuncionalidade) {
     return [];
   }
 
-  if (!temCamposNgfParaCobertura(ctx)) return [];
+  if (!comDev && !temCamposNgfParaCobertura(ctx)) return [];
 
-  const max = maxCenariosExtras();
+  const max = comDev ? maxCenariosExtrasAposDev(qtdDev) : maxCenariosExtras();
   if (max <= 0) return [];
 
   const candidatos = [];
@@ -214,7 +239,7 @@ function gerarCenariosCoberturaExtra(ctx, blocosDev, nomeFuncionalidade) {
   }
 
   if (
-    blocosDev.length === 0 &&
+    comDev &&
     !devJaCobre(blocosDev, [/cancel/i, /interromp/i, /sair\s+sem/i, /fechar\s+sem/i])
   ) {
     if (/\b(laud[aá]rio|grava[çc][aã]o|áudio|reprodu)/i.test(t)) {
@@ -264,12 +289,36 @@ function gerarCenariosCoberturaExtra(ctx, blocosDev, nomeFuncionalidade) {
   }
 
   const vistos = new Set();
+  const limiarScoreFinal = comDev ? 45 : 60;
+  if (limparTexto(ctx.comentariosTarefaFiltrado || ctx.comentariosTarefa)) {
+    const comentario = (ctx.comentariosTarefaFiltrado || ctx.comentariosTarefa).trim();
+    const frases = comentario
+      .split(/(?<=[.!?])\s+|\n+/)
+      .map((f) => f.trim())
+      .filter((f) => f.length > 20 && /deve|validar|testar|verificar|cen[aá]rio|fluxo|erro|mensagem/i.test(f));
+    for (const frase of frases.slice(0, max)) {
+      const tituloExtra = `Cobertura — comentário da tarefa`;
+      const linhasCom = montarCenarioExtra(
+        tituloExtra,
+        ctx,
+        ctx.passosFiltrados || ctx.passos || frase,
+        entaoExtraAssertivo(ctx, `  Então ${frase.replace(/^deve\s+/i, '').slice(0, 120)}`)
+      );
+      if (linhasCom) {
+        candidatos.push({
+          score: 72,
+          linhas: linhasCom,
+        });
+      }
+    }
+  }
+
   const ranqueados = candidatos
     .map((c) => ({
       ...c,
       score: c.score ?? pontuarCoberturaExtra((c.linhas[0] || '').replace(/^Cenário:\s*/i, ''), ctx, t),
     }))
-    .filter((c) => c.score >= 60)
+    .filter((c) => c.score >= limiarScoreFinal)
     .sort((a, b) => b.score - a.score);
 
   const unicos = [];

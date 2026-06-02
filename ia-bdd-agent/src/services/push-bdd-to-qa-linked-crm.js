@@ -35,19 +35,43 @@ function restErrorMessage(data) {
  * @param {number} sourceId
  * @param {string[]} qaStageIds
  */
+function pickLinkFieldValues(flat, suffixes) {
+  const out = [];
+  if (!flat || typeof flat !== 'object') return out;
+  for (const key of Object.keys(flat)) {
+    if (!/^ufCrm\d+/i.test(key)) continue;
+    const lower = key.toLowerCase();
+    if (!suffixes.some((s) => lower.includes(s))) continue;
+    const v = flat[key];
+    if (v == null || v === '') continue;
+    const t = String(v).trim();
+    if (!t || t === 'N/A') continue;
+    out.push({ key, value: t });
+  }
+  return out;
+}
+
 function buildLinkFilters(flat, sourceId) {
   const filters = [];
-  const ext = flat.ufCrm94NgfIdExterno;
-  const chamado = flat.ufCrm94NgfIdDoChamado;
   const sid = String(sourceId);
 
-  if (ext && String(ext).trim() && String(ext).trim() !== 'N/A') {
-    filters.push({ ufCrm94NgfIdExterno: String(ext).trim() });
+  const externo = pickLinkFieldValues(flat, ['idexterno', 'id_externo']);
+  const chamado = pickLinkFieldValues(flat, ['iddochamado', 'id_do_chamado', 'idchamado']);
+
+  for (const { key, value } of externo) {
+    filters.push({ [key]: value });
   }
-  if (chamado && String(chamado).trim() && String(chamado).trim() !== 'N/A') {
-    filters.push({ ufCrm94NgfIdDoChamado: String(chamado).trim() });
+  for (const { key, value } of chamado) {
+    filters.push({ [key]: value });
   }
-  filters.push({ ufCrm94NgfIdDoChamado: sid });
+
+  for (const { key } of chamado) {
+    filters.push({ [key]: sid });
+  }
+  if (!chamado.length) {
+    filters.push({ ufCrm94NgfIdDoChamado: sid });
+    filters.push({ ufCrm100NgfIdDoChamado: sid });
+  }
 
   return filters;
 }

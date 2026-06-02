@@ -5,8 +5,11 @@ const {
   classifyBddQaItemActionAsync,
   bddPodePublicarNoCrm,
 } = require('../services/push-bdd-to-crm');
-const { pushBddToLinkedBitrixTasks } = require('../services/push-bdd-to-linked-tasks');
-const { pushBddToQaLinkedCrmItems } = require('../services/push-bdd-to-qa-linked-crm');
+const {
+  discoverBddLinkedTargets,
+  shouldPushBddToMainCard,
+  pushBddToAllLinkedDestinations,
+} = require('../utils/bdd-push-routing');
 const { isQaStageId, isDevStageId } = require('../services/crm-qa-stages');
 const { getEntityTypeId } = require('../services/bitrix.service');
 const { generateBDD } = require('../agents/bdd.agent');
@@ -136,8 +139,12 @@ async function runBitrixBddCycle(packageRoot, options = {}) {
         );
       }
 
+      const targets = await discoverBddLinkedTargets(task.id, detail);
+      const gravarNoCardPrincipal = shouldPushBddToMainCard(targets);
+
       if (
         publicavel &&
+        gravarNoCardPrincipal &&
         (inQa || forcarGravacaoCrm || process.env.BITRIX_PUSH_BDD_ON_DEV_CARD === '1')
       ) {
         if (!inQa && forcarGravacaoCrm && !quiet && stageId) {
@@ -155,6 +162,18 @@ async function runBitrixBddCycle(packageRoot, options = {}) {
           crm.lastField = crmResult.field || crm.lastField;
         } else if (crmResult.skipped) crm.skipped += 1;
         else crm.failed += 1;
+      } else if (
+        publicavel &&
+        !gravarNoCardPrincipal &&
+        targets.hasLinkedDestinations &&
+        !quiet
+      ) {
+        console.log(
+          `[CRM] item ${task.id}: BDD nas tarefas/cards atrelados (card principal omitido — BITRIX_BDD_PUSH_TARGET=${process.env.BITRIX_BDD_PUSH_TARGET || 'linked'}).`
+        );
+        console.log(
+          `      Atrelados: ${targets.childCrmIds.length} filho(s) CRM, ${targets.linkedQaCrmIds.length} card(s) QA, ${targets.linkedBitrixTaskIds.length} tarefa(s) Bitrix`
+        );
       } else if (!publicavel && (inQa || forcarGravacaoCrm)) {
         crm.skipped += 1;
       } else if (publicavel && !inQa && !inDev && !forcarGravacaoCrm && !quiet) {
@@ -169,12 +188,15 @@ async function runBitrixBddCycle(packageRoot, options = {}) {
         crm.skipped += 1;
       }
 
-      const qaLinkResult = await pushBddToQaLinkedCrmItems(task.id, bdd, {
+      const linkedPush = await pushBddToAllLinkedDestinations(task.id, bdd, detail, {
         quiet,
-        detail,
       });
-      linkedTasks.updated += qaLinkResult.updated || 0;
-      if (qaLinkResult.failed) linkedTasks.failed += qaLinkResult.failed;
+      const qaLinkResult = linkedPush.qa;
+      const childCrmResult = linkedPush.child;
+      const linkResult = linkedPush.tasks;
+      linkedTasks.updated += linkedPush.updated || 0;
+      linkedTasks.failed += linkedPush.failed || 0;
+
       if (!quiet) {
         if (qaLinkResult.updated) {
           console.log(
@@ -195,14 +217,19 @@ async function runBitrixBddCycle(packageRoot, options = {}) {
         if (!qaLinkResult.updated && qaLinkResult.skipped && qaLinkResult.reason && !skipL) {
           console.log(`📎 Cards QA vinculados: ${qaLinkResult.reason}`);
         }
+        if (childCrmResult.updated) {
+          console.log(
+            `📎 Itens CRM filhos: ${childCrmResult.updated} gravado(s) — IDs ${(childCrmResult.itemIds || []).join(', ')}`
+          );
+        } else if (
+          childCrmResult.skipped &&
+          childCrmResult.reason &&
+          childCrmResult.reason !== 'nenhum item CRM filho'
+        ) {
+          console.log(`📎 Itens CRM filhos: ${childCrmResult.reason}`);
+        }
       }
 
-      const linkResult = await pushBddToLinkedBitrixTasks(task.id, bdd, {
-        quiet,
-        detail,
-      });
-      linkedTasks.updated += linkResult.updated || 0;
-      linkedTasks.failed += linkResult.failed || 0;
       if (!quiet) {
         if (linkResult.skipped) {
           console.log(

@@ -228,13 +228,34 @@ function contarBlocosDev(ctx, meta = {}) {
   return matches ? matches.length : dev.trim() ? 1 : 0;
 }
 
+function gapAfterDevEnabled() {
+  if (process.env.BDD_GAP_AFTER_DEV === '0') return false;
+  return process.env.BDD_GAP_SCENARIOS !== '0';
+}
+
+function maxGapScenarios(meta = {}) {
+  const base = Number.parseInt(process.env.BDD_GAP_MAX || '1', 10) || 1;
+  const qtdDev = contarBlocosDev({}, meta);
+  if (qtdDev > 0 && gapAfterDevEnabled()) {
+    return Math.min(3, Math.max(1, base));
+  }
+  return Math.min(4, Math.max(1, base));
+}
+
 /**
  * Teto opcional de cenários por feature (só se BDD_MAX_SCENARIOS estiver definido).
- * Sem variável: sem limite — redundâncias são removidas por dedup.
+ * Nunca abaixo da quantidade de blocos Dev + margem para extras/lacunas.
  */
-function maxTotalCenarios() {
+function maxTotalCenarios(ctx = {}, meta = {}) {
   const fromEnv = Number.parseInt(process.env.BDD_MAX_SCENARIOS || '', 10);
-  if (Number.isFinite(fromEnv) && fromEnv >= 1) return fromEnv;
+  const qtdDev = contarBlocosDev(ctx, meta);
+  const extrasAllow =
+    Number.parseInt(process.env.BDD_COVERAGE_MAX_EXTRA || '2', 10) +
+    Number.parseInt(process.env.BDD_GAP_MAX || '1', 10);
+  const piso = qtdDev > 0 ? qtdDev + (Number.isFinite(extrasAllow) ? extrasAllow : 2) : 0;
+  if (Number.isFinite(fromEnv) && fromEnv >= 1) {
+    return Math.max(fromEnv, piso);
+  }
   return Infinity;
 }
 
@@ -284,7 +305,7 @@ function gerarCenariosLacunas(ctx, cenariosExistentes, meta = {}) {
   if (process.env.BDD_GAP_SCENARIOS === '0') return [];
 
   const qtdDev = contarBlocosDev(ctx, meta);
-  if (qtdDev > 0) return [];
+  if (qtdDev > 0 && !gapAfterDevEnabled()) return [];
 
   const { ctxTemCamposEstruturados } = require('./bdd-gherkin');
   if (!ctxTemCamposEstruturados(ctx)) return [];
@@ -296,12 +317,13 @@ function gerarCenariosLacunas(ctx, cenariosExistentes, meta = {}) {
     ctx.resultadoEsperado,
     ctx.resultadoObtido,
     ctx.evidenceResumoFiltrado || ctx.evidenceResumo,
+    ctx.comentariosTarefaFiltrado || ctx.comentariosTarefa,
   ]
     .filter(Boolean)
     .join('\n')
     .toLowerCase();
   const lacunas = [];
-  const max = Number.parseInt(process.env.BDD_GAP_MAX || '1', 10) || 1;
+  const max = maxGapScenarios(meta);
   const temDefeito = devJaCobreTexto(blob, [/defeito|obtido|incorreto|mas\s+o\s+esperado/i]);
 
   const validacoes = extrairValidacoesExatas(ctx);
