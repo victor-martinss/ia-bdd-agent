@@ -127,14 +127,19 @@ async function listLinkedQaCrmItemIds(sourceItemId, detail = null) {
   const linkFilters = buildLinkFilters(flat, sourceItemId);
   const found = new Map();
 
+  const searchWithoutStageFilter =
+    process.env.BITRIX_LINKED_QA_SEARCH_WITHOUT_STAGE_FILTER !== '0';
+
   for (const etId of entityTypeIds) {
     const qaStageIds = await resolveQaStageIds(etId);
-    if (!qaStageIds.length) continue;
+    if (!qaStageIds.length && !searchWithoutStageFilter) continue;
 
-    const stageFilterRaw = buildStageFilter(qaStageIds);
-    const stageFilter = {};
-    if (stageFilterRaw.stageId) stageFilter.stageId = stageFilterRaw.stageId;
-    else if (stageFilterRaw['@stageId']) stageFilter['@stageId'] = stageFilterRaw['@stageId'];
+    let stageFilter = {};
+    if (!searchWithoutStageFilter) {
+      const stageFilterRaw = buildStageFilter(qaStageIds);
+      if (stageFilterRaw.stageId) stageFilter = { stageId: stageFilterRaw.stageId };
+      else if (stageFilterRaw['@stageId']) stageFilter = { '@stageId': stageFilterRaw['@stageId'] };
+    }
 
     for (const link of linkFilters) {
       const filter = { ...link, ...stageFilter };
@@ -143,9 +148,17 @@ async function listLinkedQaCrmItemIds(sourceItemId, detail = null) {
         const id = Number(it.id ?? it.ID);
         if (!Number.isFinite(id) || id === Number(sourceItemId)) continue;
         const stageId = String(it.stageId || it.STAGE_ID || '');
-        if (await isQaStageId(stageId, etId)) {
-          found.set(`${etId}:${id}`, { id, entityTypeId: etId, stageId, title: it.title || it.TITLE });
+        if (stageId && (await isDevStageId(stageId, etId))) continue;
+        const exigeEstagioQa = process.env.BITRIX_LINKED_QA_REQUIRE_QA_STAGE === '1';
+        if (exigeEstagioQa && stageId && !(await isQaStageId(stageId, etId))) {
+          continue;
         }
+        found.set(`${etId}:${id}`, {
+          id,
+          entityTypeId: etId,
+          stageId,
+          title: it.title || it.TITLE,
+        });
       }
     }
   }
