@@ -79,6 +79,8 @@ async function enrichCtxWithEvidence(ctx, rawItem, title) {
     imagens: evidence.imageCount || 0,
     videos: evidence.videoCount || 0,
     analisadas: evidence.analyzedImages || 0,
+    videosAnalisados: evidence.analyzedVideos || 0,
+    visionProvider: evidence.visionProvider || '',
   };
 
   if (evidence.defeitoVisivel) {

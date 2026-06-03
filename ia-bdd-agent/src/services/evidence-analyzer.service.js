@@ -4,7 +4,12 @@ const {
   downloadDiskFile,
   downloadUrlAsBase64,
 } = require('./bitrix-evidence.service');
-const { runOpenAIWithMessages, isVisionCapable } = require('./ia.service');
+const {
+  runVisionEvidenceAnalysis,
+  isVisionCapable,
+  resolveVisionProvider,
+  visionProviderLabel,
+} = require('./ia.service');
 
 function evidenceAnalysisEnabled() {
   return process.env.BDD_ANALYZE_EVIDENCE !== '0';
@@ -12,7 +17,27 @@ function evidenceAnalysisEnabled() {
 
 function maxImagesToAnalyze() {
   const n = Number.parseInt(process.env.BDD_EVIDENCE_MAX_IMAGES || '4', 10);
-  return Number.isFinite(n) && n > 0 ? Math.min(n, 8) : 4;
+  return Number.isFinite(n) && n >= 0 ? Math.min(n, 8) : 4;
+}
+
+function maxVideosToAnalyze() {
+  if (process.env.BDD_GEMINI_ANALYZE_VIDEO === '0') return 0;
+  if (resolveVisionProvider() !== 'gemini') return 0;
+  const n = Number.parseInt(process.env.BDD_EVIDENCE_MAX_VIDEOS || '1', 10);
+  return Number.isFinite(n) && n >= 0 ? Math.min(n, 2) : 1;
+}
+
+function maxVideoBytes() {
+  const n = Number.parseInt(process.env.BDD_EVIDENCE_MAX_VIDEO_BYTES || '15728640', 10);
+  return Number.isFinite(n) && n > 0 ? n : 15728640;
+}
+
+function visionSetupHint() {
+  const vp = resolveVisionProvider();
+  if (vp === 'gemini') {
+    return 'configure GEMINI_API_KEY e BDD_VISION_PROVIDER=gemini';
+  }
+  return 'configure OPENAI_API_KEY e BDD_VISION_PROVIDER=openai (ou BDD_VISION_MODEL=gpt-4o)';
 }
 
 /**
@@ -47,33 +72,60 @@ async function analyzeDevEvidence(item, ctx, meta = {}) {
   const images = arquivos.filter((a) => a.type === 'image');
   const videos = arquivos.filter((a) => a.type === 'video');
 
-  if (videos.length) {
-    partesResumo.push(
-      `Vídeos (${videos.length}): ${videos.map((v) => v.name).join(', ')} — reproduzir manualmente e validar comportamento descrito no chamado`
-    );
-  }
-
-  let analyzed = 0;
-  const imagePayloads = [];
+  let analyzedImages = 0;
+  let analyzedVideos = 0;
+  const mediaPayloads = [];
 
   for (const img of images) {
-    if (analyzed >= maxImagesToAnalyze()) break;
+    if (analyzedImages >= maxImagesToAnalyze()) break;
     let data = null;
     if (img.id) data = await downloadDiskFile(img.id);
     if (!data && img.url) data = await downloadUrlAsBase64(img.url);
     if (data && data.base64) {
-      imagePayloads.push({ name: img.name, ...data });
-      analyzed += 1;
+      mediaPayloads.push({ name: img.name, ...data });
+      analyzedImages += 1;
     }
+  }
+
+  const maxVid = maxVideosToAnalyze();
+  if (maxVid > 0) {
+    for (const vid of videos) {
+      if (analyzedVideos >= maxVid) break;
+      let data = null;
+      if (vid.id) data = await downloadDiskFile(vid.id);
+      if (!data && vid.url) data = await downloadUrlAsBase64(vid.url);
+      if (!data?.base64) continue;
+      const sizeBytes = Math.ceil((data.base64.length * 3) / 4);
+      if (sizeBytes > maxVideoBytes()) {
+        partesResumo.push(
+          `Vídeo ${vid.name} omitido (${Math.round(sizeBytes / 1048576)}MB > limite ${Math.round(maxVideoBytes() / 1048576)}MB)`
+        );
+        continue;
+      }
+      mediaPayloads.push({
+        name: vid.name,
+        base64: data.base64,
+        contentType: data.contentType || 'video/mp4',
+      });
+      analyzedVideos += 1;
+    }
+  }
+
+  if (videos.length && analyzedVideos === 0 && maxVid === 0) {
+    partesResumo.push(
+      `Vídeos (${videos.length}): ${videos.map((v) => v.name).join(', ')} — ative BDD_GEMINI_ANALYZE_VIDEO=1 com BDD_VISION_PROVIDER=gemini para análise automática`
+    );
   }
 
   let defeitoVisivel = null;
   let passosObservados = [];
   let elementosTela = [];
+  let visionProvider = visionProviderLabel();
 
-  if (imagePayloads.length && isVisionCapable()) {
+  if (mediaPayloads.length && isVisionCapable()) {
     try {
-      const vision = await runVisionAnalysis(ctx, imagePayloads);
+      const vision = await runVisionEvidenceAnalysis(ctx, mediaPayloads);
+      visionProvider = vision._provider || visionProvider;
       if (vision.resumo) partesResumo.push(vision.resumo);
       if (vision.validacoes?.length) validacoes.push(...vision.validacoes);
       if (vision.passosObservados?.length) {
@@ -85,13 +137,14 @@ async function analyzeDevEvidence(item, ctx, meta = {}) {
         partesResumo.push(`Elementos na tela: ${elementosTela.slice(0, 8).join(', ')}`);
       }
       if (vision.defeitoVisivel) defeitoVisivel = vision.defeitoVisivel;
+      partesResumo.push(
+        `Análise visual (${visionProvider}): ${analyzedImages} imagem(ns)${analyzedVideos ? `, ${analyzedVideos} vídeo(s)` : ''}`
+      );
     } catch (e) {
-      partesResumo.push(`Análise visual indisponível: ${e.message || e}`);
+      partesResumo.push(`Análise visual indisponível (${visionProvider}): ${e.message || e}`);
     }
-  } else if (images.length && !isVisionCapable()) {
-    partesResumo.push(
-      'Imagens anexadas — configure OPENAI_API_KEY e BDD_VISION_MODEL (ex.: gpt-4o) para análise automática'
-    );
+  } else if ((images.length || videos.length) && !isVisionCapable()) {
+    partesResumo.push(`Imagens/vídeos anexados — ${visionSetupHint()}`);
   }
 
   return {
@@ -100,76 +153,13 @@ async function analyzeDevEvidence(item, ctx, meta = {}) {
     arquivos,
     imageCount: images.length,
     videoCount: videos.length,
-    analyzedImages: analyzed,
+    analyzedImages,
+    analyzedVideos,
+    visionProvider,
     defeitoVisivel,
     passosObservados,
     elementosTela,
   };
-}
-
-async function runVisionAnalysis(ctx, imagePayloads) {
-  const contexto = [
-    `Título: ${ctx.titulo || ''}`,
-    ctx.descricao ? `Descrição: ${ctx.descricao}` : '',
-    ctx.passos ? `Passos: ${ctx.passos}` : '',
-    ctx.resultadoEsperado ? `Resultado esperado: ${ctx.resultadoEsperado}` : '',
-    ctx.resultadoObtido ? `Resultado obtido: ${ctx.resultadoObtido}` : '',
-    ctx.cenariosTesteDev ? `Cenários Dev:\n${ctx.cenariosTesteDev}` : '',
-  ]
-    .filter(Boolean)
-    .join('\n');
-
-  const userContent = [
-    {
-      type: 'text',
-      text:
-        'Analise as evidências (prints/vídeos) anexadas pelo Dev neste chamado Mobilemed.\n' +
-        'Responda APENAS JSON válido:\n' +
-        '{\n' +
-        '  "resumo": "o que as imagens mostram em 2-4 frases",\n' +
-        '  "passosObservados": ["passo 1", "passo 2"],\n' +
-        '  "validacoes": ["critério verificável 1", "critério 2"],\n' +
-        '  "defeitoVisivel": "comportamento errado visto ou null",\n' +
-        '  "elementosTela": ["botão X", "campo Y", "mensagem Z"]\n' +
-        '}\n\n' +
-        `Contexto do chamado:\n${contexto}`,
-    },
-  ];
-
-  for (const img of imagePayloads) {
-    userContent.push({
-      type: 'image_url',
-      image_url: {
-        url: `data:${img.contentType};base64,${img.base64}`,
-        detail: 'high',
-      },
-    });
-  }
-
-  const raw = await runOpenAIWithMessages(
-    [
-      {
-        role: 'system',
-        content:
-          'Você é QA Mobilemed. Analisa evidências visuais de bugs e extrai passos e validações objetivas para testes BDD. Responda só JSON.',
-      },
-      { role: 'user', content: userContent },
-    ],
-    { vision: true }
-  );
-
-  try {
-    const json = JSON.parse(raw.replace(/```json|```/g, '').trim());
-    return {
-      resumo: json.resumo || '',
-      validacoes: Array.isArray(json.validacoes) ? json.validacoes : [],
-      passosObservados: Array.isArray(json.passosObservados) ? json.passosObservados : [],
-      defeitoVisivel: json.defeitoVisivel || null,
-      elementosTela: json.elementosTela || [],
-    };
-  } catch {
-    return { resumo: raw.slice(0, 800), validacoes: [], passosObservados: [] };
-  }
 }
 
 module.exports = {

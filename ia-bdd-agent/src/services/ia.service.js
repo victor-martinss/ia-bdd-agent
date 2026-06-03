@@ -1,11 +1,21 @@
 const axios = require('axios');
 require('../../load-env');
 
+const { geminiConfigured, runGeminiVisionAnalysis } = require('./gemini-vision.service');
+const {
+  VISION_SYSTEM,
+  buildVisionUserPrompt,
+  parseVisionJson,
+} = require('../utils/vision-analysis-prompt');
+
 const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
 const DEFAULT_OPENAI_BASE = 'https://api.openai.com/v1';
 
-function resolveProvider() {
-  const explicit = (process.env.BDD_AI_PROVIDER || '').trim().toLowerCase();
+/** Provedor de texto (BDD/refino): openai | ollama */
+function resolveTextProvider() {
+  const explicit = (process.env.BDD_TEXT_PROVIDER || process.env.BDD_AI_PROVIDER || '')
+    .trim()
+    .toLowerCase();
   if (explicit === 'openai') return 'openai';
   if (explicit === 'ollama') return 'ollama';
   if (process.env.OPENAI_API_KEY && String(process.env.OPENAI_API_KEY).trim()) {
@@ -17,9 +27,35 @@ function resolveProvider() {
   return null;
 }
 
-/** LLM habilitada no .env (BDD_USE_LLM=1 + provedor configurado). */
+/** Provedor de visão (evidências Dev): gemini | openai */
+function resolveVisionProvider() {
+  const explicit = (process.env.BDD_VISION_PROVIDER || '').trim().toLowerCase();
+  if (explicit === 'gemini') return geminiConfigured() ? 'gemini' : null;
+  if (explicit === 'openai') {
+    return (process.env.OPENAI_API_KEY || '').trim() ? 'openai' : null;
+  }
+  if ((process.env.OPENAI_API_KEY || '').trim() && explicit !== 'gemini') {
+    return 'openai';
+  }
+  if (geminiConfigured()) return 'gemini';
+  return null;
+}
+
+/** @deprecated use resolveTextProvider */
+function resolveProvider() {
+  return resolveTextProvider();
+}
+
 function isLlmEnabled() {
-  return process.env.BDD_USE_LLM === '1' && !!resolveProvider();
+  return process.env.BDD_USE_LLM === '1' && !!resolveTextProvider();
+}
+
+function isVisionCapable() {
+  return !!resolveVisionProvider();
+}
+
+function visionProviderLabel() {
+  return resolveVisionProvider() || 'none';
 }
 
 async function runOllama(prompt) {
@@ -50,7 +86,7 @@ function openAIConfig() {
 function resolveOpenAIModel(opts = {}) {
   if (opts.vision) {
     return (
-      process.env.BDD_VISION_MODEL ||
+      process.env.BDD_OPENAI_VISION_MODEL ||
       process.env.OPENAI_VISION_MODEL ||
       'gpt-4o'
     ).trim();
@@ -58,12 +94,6 @@ function resolveOpenAIModel(opts = {}) {
   return (
     process.env.BDD_AI_MODEL || process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL
   ).trim();
-}
-
-/** Modelo com suporte a imagens (OpenAI). */
-function isVisionCapable() {
-  if (resolveProvider() !== 'openai') return false;
-  return !!(process.env.OPENAI_API_KEY || '').trim();
 }
 
 async function runOpenAIWithMessages(messages, opts = {}) {
@@ -99,6 +129,52 @@ async function runOpenAIWithMessages(messages, opts = {}) {
   return text;
 }
 
+async function runOpenAIVisionAnalysis(userText, imagePayloads) {
+  const userContent = [{ type: 'text', text: userText }];
+  for (const img of imagePayloads || []) {
+    userContent.push({
+      type: 'image_url',
+      image_url: {
+        url: `data:${img.contentType || 'image/jpeg'};base64,${img.base64}`,
+        detail: process.env.BDD_OPENAI_VISION_DETAIL || 'high',
+      },
+    });
+  }
+
+  const raw = await runOpenAIWithMessages(
+    [
+      { role: 'system', content: VISION_SYSTEM },
+      { role: 'user', content: userContent },
+    ],
+    { vision: true }
+  );
+  return parseVisionJson(raw);
+}
+
+/**
+ * Análise multimodal de evidências (imagens/vídeos) — Gemini ou OpenAI conforme BDD_VISION_PROVIDER.
+ * @param {object} ctx
+ * @param {{ base64: string, contentType: string, name?: string }[]} mediaPayloads
+ */
+async function runVisionEvidenceAnalysis(ctx, mediaPayloads) {
+  const provider = resolveVisionProvider();
+  if (!provider) {
+    throw new Error('Nenhum provedor de visão configurado (GEMINI_API_KEY ou OPENAI_API_KEY)');
+  }
+
+  const userText = buildVisionUserPrompt(ctx);
+  const media = mediaPayloads || [];
+
+  if (provider === 'gemini') {
+    const raw = await runGeminiVisionAnalysis(VISION_SYSTEM, userText, media);
+    return { ...parseVisionJson(raw), _provider: 'gemini' };
+  }
+
+  const images = media.filter((m) => (m.contentType || '').startsWith('image/'));
+  const parsed = await runOpenAIVisionAnalysis(userText, images);
+  return { ...parsed, _provider: 'openai' };
+}
+
 async function runOpenAI(prompt) {
   return runOpenAIWithMessages(
     [
@@ -118,15 +194,11 @@ function llmTimeoutMs() {
   return Number.isFinite(n) && n > 5000 ? n : 120000;
 }
 
-/**
- * @param {string} prompt
- * @returns {Promise<string>}
- */
 async function runIA(prompt) {
-  const provider = resolveProvider();
+  const provider = resolveTextProvider();
   if (!provider) {
     throw new Error(
-      'Nenhum provedor de IA: defina OPENAI_API_KEY (openai) ou OLLAMA_URL+MODEL (ollama)'
+      'Nenhum provedor de texto: defina OPENAI_API_KEY (BDD_TEXT_PROVIDER=openai) ou OLLAMA_URL+MODEL'
     );
   }
   if (provider === 'openai') return runOpenAI(prompt);
@@ -136,7 +208,11 @@ async function runIA(prompt) {
 module.exports = {
   runIA,
   runOpenAIWithMessages,
+  runVisionEvidenceAnalysis,
   isLlmEnabled,
   isVisionCapable,
   resolveProvider,
+  resolveTextProvider,
+  resolveVisionProvider,
+  visionProviderLabel,
 };

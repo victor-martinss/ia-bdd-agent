@@ -381,8 +381,15 @@ async function generateBDD(title, item) {
         : 'completo';
 
   if (ctx.evidenceMeta?.arquivos > 0) {
+    const vp = ctx.evidenceMeta.visionProvider
+      ? ` via ${ctx.evidenceMeta.visionProvider}`
+      : '';
+    const vid =
+      ctx.evidenceMeta.videosAnalisados > 0
+        ? `, ${ctx.evidenceMeta.videosAnalisados} vídeo(s)`
+        : '';
     console.log(
-      `[BDD] Evidências Dev: ${ctx.evidenceMeta.arquivos} arquivo(s), ${ctx.evidenceMeta.analisadas || 0} imagem(ns) com visão`
+      `[BDD] Evidências Dev: ${ctx.evidenceMeta.arquivos} arquivo(s), ${ctx.evidenceMeta.analisadas || 0} imagem(ns) com visão${vid}${vp}`
     );
   }
 
@@ -408,7 +415,7 @@ async function generateBDD(title, item) {
   if (llmOn && llmRefineEnabled() && !forceLlm && (ngfRich || titleOnly)) {
     try {
       if (process.env.DEBUG_BITRIX === '1') {
-        console.log('[BDD] Refino OpenAI sobre rascunho estruturado (bdd-refine.txt)');
+        console.log('[BDD] Refino OpenAI (texto) sobre rascunho estruturado (bdd-refine.txt)');
       }
       const refined = await generateBddRefineViaLlm(title, ctx, feature, meta);
       if (bddLlmOutputValido(refined, ctx)) {

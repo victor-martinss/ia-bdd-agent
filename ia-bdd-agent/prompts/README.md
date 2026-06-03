@@ -34,7 +34,9 @@ BDD_PROMPT_MODE=auto
 # Modo assertivo (padrão): descrição, passos, resultados + evidências antes do BDD
 # BDD_ASSERTIVE_MODE=1
 # BDD_ANALYZE_EVIDENCE=1
-# BDD_VISION_MODEL=gpt-4o
+# Texto (refino BDD): BDD_TEXT_PROVIDER=openai + OPENAI_API_KEY
+# Visão (prints/vídeos Dev): BDD_VISION_PROVIDER=gemini + GEMINI_API_KEY
+# BDD_GEMINI_VISION_MODEL=gemini-2.0-flash
 # BDD_EVIDENCE_MAX_IMAGES=4
 # BDD_ASSERTIVE_LLM=1   # força LLM mesmo com Cenários Dev
 
