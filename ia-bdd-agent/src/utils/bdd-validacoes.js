@@ -3,6 +3,7 @@ const {
   limparTexto,
   primeiraFrase,
   stripTextoAdministrativo,
+  fraseEhIncompleta,
 } = require('./bdd-gherkin');
 const { entaoEhVago, extrairEntaoDoTexto } = require('./bdd-rigor');
 
@@ -26,8 +27,8 @@ function extrairValidacoesExatas(ctx) {
   const add = (origem, texto) => {
     const t = stripTextoAdministrativo(String(texto || ''));
     if (!t || t.length < 8) return;
-    const entao = entaoVerificavel(t) || t.slice(0, 110);
-    if (entaoEhVago(entao)) return;
+    const entao = entaoVerificavel(t);
+    if (!entao || fraseEhIncompleta(entao) || entaoEhVago(entao)) return;
     const key = entao.toLowerCase();
     if (seen.has(key)) return;
     seen.add(key);

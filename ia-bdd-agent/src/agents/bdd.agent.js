@@ -203,11 +203,16 @@ function buildStructuredBdd(title, ctx) {
 
 function finalizarFeatureBdd(feature, ctx, meta = {}) {
   if (!feature) return feature;
-  const { repararFeatureGherkinDesconexo } = require('../utils/bdd-gherkin-structure');
+  const { repararFeatureGherkinDesconexo, assegurarCenariosCompletos } = require('../utils/bdd-gherkin-structure');
+  const { planificarFeatureBdd, plannerEnabled } = require('../utils/bdd-scenario-planner');
+  const { numerarCenariosNaFeature } = require('../utils/bdd-scenario-numbering');
   const reparado = repararFeatureGherkinDesconexo(feature, ctx);
   const { rigorizarFeatureBdd } = require('../utils/bdd-rigor');
   const rigor = rigorizarFeatureBdd(reparado, ctx);
-  return planificarFeatureBdd(rigor, ctx, meta);
+  const completo = assegurarCenariosCompletos(rigor, ctx);
+  const planificado = planificarFeatureBdd(completo, ctx, meta);
+  if (plannerEnabled()) return planificado;
+  return numerarCenariosNaFeature(planificado);
 }
 
 function llmRefineEnabled() {
@@ -267,6 +272,7 @@ function montarInputLlm(title, ctx) {
     '- Resuma: 1 Quando + até 3 "E" objetivos; sem micro-cliques nem texto administrativo.',
     '- NÃO repita cenários com mesmo fluxo/Então; una redundâncias.',
     '- ORDEM de saída: (1) reprodução do defeito se houver, (2) cenários Dev na ordem, (3) lacunas do chamado, (4) cobertura extra por risco.',
+    '- Numere cada cenário sequencialmente: Cenário 1:, Cenário 2:, … até o total gerado.',
     '- Lacunas: inclua cenário só se validação do chamado/evidência não estiver coberta.',
     '- Converta cada cenário Dev; extras só quando agregarem risco real ao chamado.',
     '- PROIBIDO inventar: telas, botões, mensagens ou dados que não estejam no chamado/Dev/evidências.',
@@ -321,7 +327,7 @@ function bddLlmOutputValido(texto, ctx = {}) {
   if (t.length < 40) return false;
   if (/^#\s*Não foi possível gerar BDD/i.test(t)) return false;
   if (/^#\s*Erro ao gerar BDD/i.test(t)) return false;
-  if (!/funcionalidade\s*:/i.test(t) && !/cenário\s*:/i.test(t)) return false;
+  if (!/funcionalidade\s*:/i.test(t) && !/cen[aá]rio\s*(?:\d+\s*)?:/i.test(t)) return false;
   if (PASSOS_BLOQUEADOS_LLM.test(t)) return false;
   if (/tarefa\s+aberta|evid[eê]ncias?\s+enviadas/i.test(t)) return false;
   if (
@@ -356,8 +362,8 @@ async function generateBddViaLlm(title, ctx, meta = {}) {
 
 async function prepararCtxBdd(title, item) {
   const fullCtx = extractTaskContext(item);
-  let ctx = await enrichCtxWithEvidence(fullCtx, item, title);
-  ctx = await enrichCtxFromLinkedCrm(ctx, item);
+  let ctx = await enrichCtxFromLinkedCrm(fullCtx, item);
+  ctx = await enrichCtxWithEvidence(ctx, item, title);
 
   // Não usa histórico antigo de QA para evitar contaminação de contexto.
   ctx.qaHistorico = { isRetornoQa: false, reason: '' };

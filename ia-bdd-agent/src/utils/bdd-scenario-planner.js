@@ -1,6 +1,12 @@
-const { limparTexto } = require('./bdd-gherkin');
+const { limparTexto, fraseEhIncompleta } = require('./bdd-gherkin');
 const { extrairValidacoesExatas } = require('./bdd-validacoes');
 const { textoConsolidado, montarCenarioExtra } = require('./bdd-coverage-extra');
+const {
+  isLinhaCenario,
+  stripPrefixoNumericoCenario,
+  numerarCenariosObjeto,
+  numerarCenariosNaFeature,
+} = require('./bdd-scenario-numbering');
 
 function plannerEnabled() {
   return process.env.BDD_SCENARIO_PLANNER !== '0';
@@ -51,9 +57,11 @@ function parseFeatureEmCenarios(feature) {
 
   for (const line of linhas) {
     const trimmed = line.trimEnd();
-    if (/^cenário\s*:/i.test(trimmed)) {
+    if (isLinhaCenario(trimmed)) {
       if (atual) cenarios.push(atual);
-      const titulo = trimmed.replace(/^cenário\s*:\s*/i, '').trim();
+      const titulo = stripPrefixoNumericoCenario(
+        trimmed.replace(/^cen[aá]rio\s*(?:\d+\s*)?:\s*/i, '')
+      );
       atual = { titulo, linhas: [trimmed], texto: '' };
       continue;
     }
@@ -340,14 +348,13 @@ function gerarCenariosLacunas(ctx, cenariosExistentes, meta = {}) {
     const frag = normalizarTexto(v.entao).slice(0, 40);
     if (frag.length < 8) continue;
     if (blob.includes(frag.slice(0, 25))) continue;
-    lacunas.push(
-      montarCenarioExtra(
-        `Lacuna — ${v.origem.slice(0, 40)}`,
-        ctx,
-        (ctx.passosObjetivos || []).slice(0, 3).join('\n') || ctx.passosFiltrados || ctx.passos,
-        `  Então ${v.entao}`
-      )
+    const extraLacuna = montarCenarioExtra(
+      `Lacuna — ${v.origem.slice(0, 40)}`,
+      ctx,
+      (ctx.passosObjetivos || []).slice(0, 3).join('\n') || ctx.passosFiltrados || ctx.passos,
+      fraseEhIncompleta(v.entao) ? null : `  Então ${v.entao}`
     );
+    if (extraLacuna) lacunas.push(extraLacuna);
     if (lacunas.length >= max) break;
   }
 
@@ -408,12 +415,67 @@ function extrairMapaCoberturaDev(cenarios) {
   return mapa;
 }
 
+function cenarioEspelhaDev(cenario, ctx) {
+  if (/#\s*cobertura\s+dev\s*:/i.test(cenario.texto || '')) return true;
+  const titulo = normalizarTexto(cenario.titulo);
+  return (ctx._ordemDev || []).some((d) => similaridade(d, titulo) > 0.52);
+}
+
+/**
+ * Garante ao menos um cenário QA por bloco Dev ainda não coberto.
+ * @param {object} ctx
+ * @param {{ titulo: string, linhas: string[], texto: string }[]} existentes
+ */
+function gerarCenariosFaltantesDoDev(ctx, existentes) {
+  if (process.env.BDD_ENSURE_DEV_MIRROR === '0') return [];
+  const {
+    parseCenariosDevBlocos,
+    cenariosQaAPartirDoDev,
+    nomeFuncionalidadeCurto,
+  } = require('./bdd-gherkin');
+  const blocos = parseCenariosDevBlocos(ctx.cenariosTesteDev);
+  if (!blocos.length) return [];
+
+  const faltantes = [];
+  const nomeFunc = nomeFuncionalidadeCurto(ctx.titulo);
+
+  for (const bloco of blocos) {
+    const refDev = bloco.title || '';
+    const jaCoberto =
+      existentes.some((c) => cenarioEspelhaDev(c, ctx) && similaridade(refDev, c.titulo) > 0.55) ||
+      existentes.some(
+        (c) =>
+          refDev &&
+          (c.texto || '').toLowerCase().includes(refDev.toLowerCase().slice(0, 40))
+      );
+    if (jaCoberto) continue;
+
+    const partes = cenariosQaAPartirDoDev(bloco, ctx, nomeFunc);
+    for (const linhas of partes) {
+      if (!linhas?.length) continue;
+      const titulo = stripPrefixoNumericoCenario(
+        (linhas[0] || '').replace(/^cen[aá]rio\s*(?:\d+\s*)?:\s*/i, '')
+      );
+      faltantes.push({
+        titulo,
+        linhas,
+        texto: linhas.join('\n'),
+        _origem: 'dev_faltante',
+      });
+      break;
+    }
+  }
+  return faltantes;
+}
+
 function montarCabecalhoPlano(ctx, qtdDev, qtdExtra, qtdLacunas, removidos, cenarios = []) {
   const linhas = [];
+  const total = cenarios.length;
   const partes = [`${qtdDev} do Dev`];
   if (qtdExtra) partes.push(`${qtdExtra} cobertura`);
   if (qtdLacunas) partes.push(`${qtdLacunas} lacuna(s)`);
   linhas.push(`# Cenários QA: ${partes.join(' + ')} — ordem por risco/criticidade`);
+  linhas.push(`# Total: ${total} cenário(s) numerado(s) (1 a ${total})`);
   if (ctx.resumoObjetivo) {
     linhas.push(`# ${ctx.resumoObjetivo}`);
   }
@@ -446,10 +508,15 @@ function planificarFeatureBdd(feature, ctx, meta = {}) {
   if (!cenarios.length) return feature;
 
   const { cenarios: semDup, removidos } = removerCenariosRedundantes(cenarios, ctx);
-  const lacunasRaw = gerarCenariosLacunas(ctx, semDup, meta)
+  const faltantesDev = gerarCenariosFaltantesDoDev(ctx, semDup);
+  const baseComDev = [...semDup, ...faltantesDev];
+
+  const lacunasRaw = gerarCenariosLacunas(ctx, baseComDev, meta)
     .filter(Boolean)
     .map((linhas) => ({
-      titulo: (linhas[0] || '').replace(/^Cenário:\s*/i, '').trim(),
+      titulo: stripPrefixoNumericoCenario(
+        (linhas[0] || '').replace(/^cen[aá]rio\s*(?:\d+\s*)?:\s*/i, '')
+      ),
       linhas,
       texto: linhas.join('\n'),
     }));
@@ -459,7 +526,7 @@ function planificarFeatureBdd(feature, ctx, meta = {}) {
   );
   removidos.push(...remLac);
 
-  let todos = ordenarCenarios([...semDup, ...lacunas], ctx);
+  let todos = ordenarCenarios([...baseComDev, ...lacunas], ctx);
   const { cenarios: finais, removidos: remFinal } = removerCenariosRedundantes(todos, ctx);
   removidos.push(...remFinal);
   todos = finais;
@@ -475,7 +542,10 @@ function planificarFeatureBdd(feature, ctx, meta = {}) {
     (l, i) => i === funcIdx || (!/^#\s*cenários/i.test(l.trim()) && !/^#\s+redundantes/i.test(l.trim()))
   );
 
-  const qtdDev = meta.qtdDev ?? semDup.filter((c) => !/cobertura|lacuna/i.test(c.titulo)).length;
+  const qtdDev =
+    meta.qtdDev ??
+    contarBlocosDev(ctx, meta) ??
+    baseComDev.filter((c) => cenarioEspelhaDev(c, ctx) || !/cobertura|lacuna/i.test(c.titulo)).length;
   const qtdExtra = todos.filter((c) => /cobertura\s*—/i.test(c.titulo)).length;
   const qtdLacunas = todos.filter((c) => /lacuna\s*—/i.test(c.titulo)).length;
   const planHeader = bddInternalCommentsEnabled()
@@ -501,6 +571,8 @@ function planificarFeatureBdd(feature, ctx, meta = {}) {
     out.push(`Funcionalidade: ${nomeFuncionalidadeCurto(ctx.titulo)}`, '');
   }
 
+  todos = numerarCenariosObjeto(todos);
+
   for (const cen of todos) {
     out.push(...cen.linhas, '');
   }
@@ -514,6 +586,7 @@ module.exports = {
   planificarFeatureBdd,
   removerCenariosRedundantes,
   gerarCenariosLacunas,
+  gerarCenariosFaltantesDoDev,
   ordenarCenarios,
   classificarCenario,
   similaridade,

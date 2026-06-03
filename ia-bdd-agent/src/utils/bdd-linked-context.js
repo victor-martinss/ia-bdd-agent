@@ -1,28 +1,90 @@
-const { flattenItem, textoCenariosTesteDevFromItem, isMeaningful, texto } = require('../agents/parser');
+const {
+  flattenItem,
+  isMeaningful,
+  extractTaskContext,
+} = require('../agents/parser');
 const { getTaskDetail } = require('../services/bitrix.service');
 const {
   parentIdFromItem,
   listChildCrmItemIds,
 } = require('../services/crm-item-links');
+const { pickCrmUfText } = require('./crm-field-resolver');
+const { extractCrmUrlRefsFromFlat } = require('./crm-item-ref');
 const { limparTexto } = require('./bdd-gherkin');
 
-function mergeDevTexto(atual, novo) {
+function mergeTextoBlock(atual, novo, rotulo) {
   const a = limparTexto(atual);
   const n = limparTexto(novo);
   if (!n) return a;
   if (!a) return n;
   if (a.includes(n.slice(0, Math.min(80, n.length)))) return a;
-  return `${a}\n\n--- Dev (card vinculado) ---\n${n}`;
+  const tag = rotulo ? `--- ${rotulo} ---` : '--- card vinculado ---';
+  return `${a}\n\n${tag}\n${n}`;
+}
+
+function entityTypeProbeList(currentEtId) {
+  const fromEnv = String(process.env.BITRIX_ENTITY_TYPE_IDS || '')
+    .split(/[,;\s]+/)
+    .map((s) => Number.parseInt(s.trim(), 10))
+    .filter((n) => Number.isFinite(n) && n > 0);
+  const urlEt = Number.parseInt(String(process.env.BITRIX_ENTITY_TYPE_ID || ''), 10);
+  const base = [
+    currentEtId,
+    ...fromEnv,
+    Number.isFinite(urlEt) && urlEt > 0 ? urlEt : null,
+    1272,
+    1276,
+    1294,
+  ].filter((n) => Number.isFinite(n) && n > 0);
+  return base.filter((n, i, arr) => arr.indexOf(n) === i);
 }
 
 /**
- * Busca Cenários de Teste (Dev) em cards pai/filho/vínculo no mesmo SPA.
+ * @param {Record<string, unknown>} lflat
+ * @param {object} acc
+ */
+function mergeLinkedFields(acc, lflat) {
+  const lctx = extractTaskContext(lflat);
+
+  if (isMeaningful(lctx.cenariosTesteDev)) {
+    acc.cenariosTesteDev = mergeTextoBlock(
+      acc.cenariosTesteDev,
+      lctx.cenariosTesteDev,
+      'Dev (card vinculado)'
+    );
+  }
+  if (!limparTexto(acc.descricao) && isMeaningful(lctx.descricao)) {
+    acc.descricao = lctx.descricao;
+  }
+  if (!limparTexto(acc.passos) && isMeaningful(lctx.passos)) {
+    acc.passos = lctx.passos;
+  }
+  if (!limparTexto(acc.resultadoEsperado) && isMeaningful(lctx.resultadoEsperado)) {
+    acc.resultadoEsperado = lctx.resultadoEsperado;
+  }
+  if (!limparTexto(acc.resultadoObtido) && isMeaningful(lctx.resultadoObtido)) {
+    acc.resultadoObtido = lctx.resultadoObtido;
+  }
+  if (!limparTexto(acc.observacoes) && isMeaningful(lctx.observacoes)) {
+    acc.observacoes = lctx.observacoes;
+  }
+  if (!limparTexto(acc.comentariosTarefa) && isMeaningful(lctx.comentariosTarefa)) {
+    acc.comentariosTarefa = lctx.comentariosTarefa;
+  }
+
+  const legacy = pickCrmUfText(lflat, ['DescricaoDoOcorrido']);
+  if (!limparTexto(acc.descricao) && isMeaningful(legacy)) {
+    acc.descricao = legacy;
+  }
+}
+
+/**
+ * Busca descrição, passos, cenários Dev e fontes de evidência em cards pai/vínculo (incl. URLs CRM em UFs).
  * @param {object} ctx
  * @param {object} rawItem
  */
 async function enrichCtxFromLinkedCrm(ctx, rawItem) {
   if (process.env.BDD_ENRICH_FROM_LINKED_CRM === '0') return ctx;
-  if (limparTexto(ctx.cenariosTesteDev)) return ctx;
 
   const flat = flattenItem(rawItem || {});
   const etId = Number.parseInt(
@@ -32,90 +94,129 @@ async function enrichCtxFromLinkedCrm(ctx, rawItem) {
   const itemId = Number.parseInt(String(flat.id || flat.ID || ''), 10);
   if (!Number.isFinite(etId) || !Number.isFinite(itemId)) return ctx;
 
-  const entityProbe = [
-    etId,
-    ...String(process.env.BITRIX_ENTITY_TYPE_IDS || '')
-      .split(/[,;\s]+/)
-      .map((s) => Number.parseInt(s.trim(), 10))
-      .filter((n) => Number.isFinite(n) && n > 0),
-    1276,
-    1294,
-  ].filter((n, i, arr) => arr.indexOf(n) === i);
+  const entityProbe = entityTypeProbeList(etId);
+  const visitados = new Set([`${etId}:${itemId}`]);
+  /** @type {{ entityTypeId: number, itemId: number, priority: number }[]} */
+  const fila = [];
 
-  const visitados = new Set([itemId]);
-  const candidatos = [];
+  for (const ref of extractCrmUrlRefsFromFlat(flat)) {
+    fila.push({ ...ref, priority: 0 });
+  }
 
   const parentId = parentIdFromItem(flat, etId);
-  if (parentId) candidatos.push(parentId);
+  if (parentId) fila.push({ entityTypeId: etId, itemId: parentId, priority: 1 });
 
   try {
     const filhos = await listChildCrmItemIds(itemId, etId);
-    candidatos.push(...filhos);
+    for (const cid of filhos) {
+      fila.push({ entityTypeId: etId, itemId: cid, priority: 2 });
+    }
   } catch {
     /* ignore */
   }
 
   const chamado =
     flat.ufCrm94NgfIdDoChamado ||
-    flat.ufCrm100NgfIdDoChamado ||
-    flat.ufCrm94NgfIdExterno ||
-    flat.ufCrm100NgfIdExterno;
+    flat.ufCrm100NgfIdDoChamado;
   if (chamado && String(chamado).trim() && String(chamado).trim() !== 'N/A') {
     const linkId = Number.parseInt(String(chamado).trim(), 10);
-    if (Number.isFinite(linkId) && linkId > 0) candidatos.push(linkId);
-  }
-
-  let dev = '';
-  let descricao = ctx.descricao || '';
-  let passos = ctx.passos || '';
-
-  for (const cid of candidatos) {
-    if (!cid || visitados.has(cid)) continue;
-    visitados.add(cid);
-    try {
-      let linked = null;
-      for (const probeEt of entityProbe) {
-        try {
-          linked = await getTaskDetail(cid, {
-            entityTypeId: probeEt,
-            noGlobalOverride: true,
-          });
-          if (linked) break;
-        } catch {
-          /* tenta outro SPA */
-        }
-      }
-      if (!linked) continue;
-      const lflat = flattenItem(linked);
-      const devLinked = textoCenariosTesteDevFromItem(lflat);
-      if (isMeaningful(devLinked)) {
-        dev = mergeDevTexto(dev, devLinked);
-      }
-      if (!limparTexto(descricao)) {
-        const { pickCrmUfText } = require('./crm-field-resolver');
-        const d = pickCrmUfText(lflat, ['NgfDescricaoDoOcorrido', 'DescricaoDoOcorrido']);
-        if (isMeaningful(d)) descricao = d;
-      }
-      if (!limparTexto(passos)) {
-        const { pickCrmUfText } = require('./crm-field-resolver');
-        const p = pickCrmUfText(lflat, ['NgfPassosParaReproduzir', 'PassosParaReproduzir']);
-        if (isMeaningful(p)) passos = p;
-      }
-      if (limparTexto(dev)) break;
-    } catch {
-      /* próximo vínculo */
+    if (Number.isFinite(linkId) && linkId > 0) {
+      fila.push({ entityTypeId: 0, itemId: linkId, priority: 3 });
     }
   }
 
-  if (!dev && !descricao && !passos) return ctx;
+  fila.sort((a, b) => a.priority - b.priority);
+
+  const acc = {
+    cenariosTesteDev: ctx.cenariosTesteDev || '',
+    descricao: ctx.descricao || '',
+    passos: ctx.passos || '',
+    resultadoEsperado: ctx.resultadoEsperado || '',
+    resultadoObtido: ctx.resultadoObtido || '',
+    observacoes: ctx.observacoes || '',
+    comentariosTarefa: ctx.comentariosTarefa || '',
+  };
+  /** @type {{ rawItem: object, entityTypeId: number, itemId: number }[]} */
+  const evidenceSources = [];
+
+  for (const alvo of fila) {
+    const key = alvo.entityTypeId
+      ? `${alvo.entityTypeId}:${alvo.itemId}`
+      : `?:${alvo.itemId}`;
+    if (visitados.has(key)) continue;
+    visitados.add(key);
+
+    let linked = null;
+    let resolvedEt = alvo.entityTypeId;
+
+    if (alvo.entityTypeId > 0) {
+      try {
+        linked = await getTaskDetail(alvo.itemId, {
+          entityTypeId: alvo.entityTypeId,
+          noGlobalOverride: true,
+        });
+      } catch {
+        /* tenta probe */
+      }
+    }
+
+    if (!linked) {
+      for (const probeEt of entityProbe) {
+        if (probeEt === etId && alvo.itemId === itemId) continue;
+        try {
+          linked = await getTaskDetail(alvo.itemId, {
+            entityTypeId: probeEt,
+            noGlobalOverride: true,
+          });
+          if (linked) {
+            resolvedEt = probeEt;
+            break;
+          }
+        } catch {
+          /* próximo SPA */
+        }
+      }
+    }
+
+    if (!linked) continue;
+
+    const lflat = flattenItem(linked);
+    const resolvedId = Number.parseInt(String(lflat.id || lflat.ID || alvo.itemId), 10);
+    const resolvedKey = `${resolvedEt}:${resolvedId}`;
+    if (visitados.has(resolvedKey) && resolvedKey !== key) continue;
+    visitados.add(resolvedKey);
+
+    mergeLinkedFields(acc, lflat);
+    evidenceSources.push({
+      rawItem: linked,
+      entityTypeId: resolvedEt,
+      itemId: resolvedId,
+    });
+
+    if (
+      limparTexto(acc.cenariosTesteDev) &&
+      limparTexto(acc.descricao) &&
+      limparTexto(acc.passos)
+    ) {
+      break;
+    }
+  }
+
+  const enriched =
+    acc.cenariosTesteDev !== (ctx.cenariosTesteDev || '') ||
+    acc.descricao !== (ctx.descricao || '') ||
+    acc.passos !== (ctx.passos || '') ||
+    acc.resultadoEsperado !== (ctx.resultadoEsperado || '') ||
+    acc.resultadoObtido !== (ctx.resultadoObtido || '');
+
+  if (!enriched && !evidenceSources.length) return ctx;
 
   return {
     ...ctx,
-    cenariosTesteDev: dev || ctx.cenariosTesteDev,
-    descricao: descricao || ctx.descricao,
-    passos: passos || ctx.passos,
-    _fontesVinculo: dev ? 'card_vinculado' : '',
+    ...acc,
+    _fontesVinculo: enriched || evidenceSources.length ? 'card_vinculado' : ctx._fontesVinculo,
+    _linkedCrmEvidenceSources: evidenceSources,
   };
 }
 
-module.exports = { enrichCtxFromLinkedCrm };
+module.exports = { enrichCtxFromLinkedCrm, mergeTextoBlock, entityTypeProbeList };

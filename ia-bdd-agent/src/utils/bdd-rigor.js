@@ -4,6 +4,7 @@ const {
   entaoVerificavel,
   passoEhColagemDescricao,
   passosParaStepsGherkin,
+  fraseEhIncompleta,
 } = require('./bdd-gherkin');
 
 function rigorEnabled() {
@@ -193,9 +194,9 @@ function rigorizarFeatureBdd(feature, ctx = {}) {
       continue;
     }
 
-    if (/^\s*então\s+/i.test(t)) {
+    if (/^\s*ent[aã]o\s+/i.test(t)) {
       const corpo = t.replace(/^\s*ent[aã]o\s+/i, '');
-      if (entaoEhVago(corpo)) {
+      if (entaoEhVago(corpo) || fraseEhIncompleta(corpo)) {
         if (entaoFallback) {
           out.push(entaoFallback);
           temEntaoNoCenario = true;
@@ -203,7 +204,13 @@ function rigorizarFeatureBdd(feature, ctx = {}) {
         continue;
       }
       const ev = entaoVerificavel(corpo);
-      out.push(ev ? `  Então ${ev}` : trimmed.replace(/^\s*/, '  '));
+      if (ev && !fraseEhIncompleta(ev)) {
+        out.push(`  Então ${ev}`);
+      } else if (entaoFallback) {
+        out.push(entaoFallback);
+      } else {
+        out.push(trimmed.replace(/^\s*/, '  '));
+      }
       temEntaoNoCenario = true;
       continue;
     }

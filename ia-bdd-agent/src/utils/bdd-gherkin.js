@@ -13,6 +13,35 @@ const MAX_PASSO_CHARS =
   Number.parseInt(process.env.BDD_MAX_STEP_CHARS || '120', 10) || 120;
 const MAX_PASSO_PALAVRAS =
   Number.parseInt(process.env.BDD_MAX_STEP_WORDS || '18', 10) || 18;
+const MAX_ENTAO_CHARS =
+  Number.parseInt(process.env.BDD_MAX_ENTAO_CHARS || '220', 10) || 220;
+
+/** Terminações que indicam frase cortada no meio (sem fechamento). */
+const TERMINACOES_INCOMPLETAS =
+  /\b(o|a|os|as|um|uma|de|do|da|dos|das|d[oa]s|em|no|na|nos|nas|para|por|com|sem|ao|à|aos|às|após|antes|entre|sobre|durante|que|se|até|como|the|and|or|to|for|with|in|on|at|after|before)\s*$/i;
+
+/** Detecta Então/Quando cortado, colagem ou sem fechamento. */
+function fraseEhIncompleta(texto) {
+  const bruto = String(texto || '');
+  const t = limparTexto(bruto.replace(/^ent[aã]o\s+|^quando\s+|^e\s+o\s+usu[aá]rio\s+/i, ''));
+  if (!t || t.length < 10) return true;
+  if (/…|\.\.\./.test(bruto)) return true;
+  if (TERMINACOES_INCOMPLETAS.test(t)) return true;
+  if (/[a-záéíóúãõ][A-ZÁÉÍÓÚÁÉÍÓÚ][a-záéíóú]/.test(t)) return true;
+  if (/\b(Salvar|Configurar|Abrir|Acessar)[a-záéíóú]/.test(t)) return true;
+  if (t.split(/\s+/).length > 22 && !/[.!?]$/.test(t)) return true;
+  return false;
+}
+
+/** Quando colado (várias ações numa linha) ou ilegível. */
+function passoEhColagemGherkin(texto) {
+  const t = limparTexto(String(texto || '').replace(/^quando\s+|^e\s+/i, ''));
+  if (!t) return true;
+  if (passoEhColagemDescricao(t)) return true;
+  if (fraseEhIncompleta(t)) return true;
+  if (t.length > MAX_PASSO_CHARS * 1.35) return true;
+  return false;
+}
 
 /** Título/Funcionalidade/Cenário: só normaliza — nunca trunca. */
 function normalizarTitulo(texto) {
@@ -158,11 +187,22 @@ function consolidarAcoesObjetivas(acoes, maxSlots) {
 }
 
 /** Converte ações resumidas em Quando + E (ordem preservada). */
+function formatarCorpoAcao(corpo) {
+  let c = String(corpo || '').trim();
+  if (!c) return '';
+  if (!/^o\s+usu[aá]rio\s+/i.test(c)) {
+    c = `o usuário ${c.charAt(0).toLowerCase()}${c.slice(1)}`;
+  }
+  return c
+    .replace(/\bo usuário\s+configura e inserir\b/i, 'o usuário configura e insere')
+    .replace(/\bo usuário\s+salvar\b/i, 'o usuário salva');
+}
+
 function acoesParaLinhasGherkin(acoes) {
   if (!acoes.length) return [];
-  const linhas = [`  Quando ${acoes[0]}`];
+  const linhas = [`  Quando ${formatarCorpoAcao(acoes[0])}`];
   for (let i = 1; i < acoes.length; i += 1) {
-    linhas.push(`    E ${acoes[i]}`);
+    linhas.push(`    E ${formatarCorpoAcao(acoes[i])}`);
   }
   return linhas;
 }
@@ -255,8 +295,16 @@ function entaoVerificavel(texto) {
     }
   }
 
-  t = objetivarFrase(t, 150);
+  t = objetivarFrase(t, MAX_ENTAO_CHARS);
   if (!t) return '';
+
+  if (fraseEhIncompleta(t)) {
+    const pf = primeiraFrase(limparMarkdownCru(stripTextoAdministrativo(texto)));
+    if (pf && pf.length > t.length) {
+      const pfObj = objetivarFrase(pf, MAX_ENTAO_CHARS);
+      if (pfObj && !fraseEhIncompleta(pfObj)) t = pfObj;
+    }
+  }
 
   if (/^(o|a|os|as|nenhum|nenhuma)\s/i.test(t)) return t;
   if (/^(exibe|apresenta|permanece|são|está|continua)/i.test(t)) return t;
@@ -427,8 +475,31 @@ function passoGherkin(tipo, texto) {
  * @param {string} texto
  * @returns {string[]}
  */
+const VERBOS_PASSO_COLADOS =
+  'Acessar|Abrir|Configurar|Inserir|Salvar|Verificar|Validar|Confirmar|Comparar|Registrar|Aplicar|Selecionar|Informar|Clicar|Preencher|Exportar|Imprimir|Localizar|Navegar|Aguardar|Realizar|Executar|Visualizar|Editar|Remover|Excluir|Filtrar|Pesquisar|Enviar|Receber|Autenticar|Login|Logout';
+
+/**
+ * Separa passos colados pelo Bitrix (ex.: "portal VetConfigurar/inserir...Salvar...").
+ * @param {string} texto
+ */
+function desconcatenarPassosColados(texto) {
+  let t = String(texto || '').trim();
+  if (!t) return t;
+  t = t.replace(/\//g, ' e ');
+  const re = new RegExp(
+    `([a-záéíóúãõ0-9])((?:${VERBOS_PASSO_COLADOS}))(?=[\\s/]|$|[A-ZÁÉÍÓÚ])`,
+    'g'
+  );
+  t = t.replace(re, '$1\n$2');
+  return t
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .join('\n');
+}
+
 function preservarQuebrasDeLinha(texto) {
-  return String(texto || '')
+  let t = String(texto || '')
     .trim()
     .replace(/\r\n/g, '\n')
     .replace(/[ \t]+/g, ' ')
@@ -437,6 +508,10 @@ function preservarQuebrasDeLinha(texto) {
       /^(descrição|contexto|passo|resultado|observação)\s*(do\s+ocorrido)?\s*:\s*/gim,
       ''
     );
+  if (t && !/\n/.test(t) && (passoEhColagemGherkin(t) || new RegExp(VERBOS_PASSO_COLADOS, 'i').test(t))) {
+    t = desconcatenarPassosColados(t);
+  }
+  return t;
 }
 
 function extrairPassosDoTexto(texto) {
@@ -547,6 +622,23 @@ function passosParaStepsGherkin(passos, opts = {}) {
   const maxLinhas =
     opts.maxLinhas ??
     (Number.parseInt(process.env.BDD_MAX_PASSO_LINES || '4', 10) || 4);
+  const maxE = opts.maxE ?? maxEPorCenario();
+  const maxSlots = 1 + maxE;
+
+  const partes = extrairPassosDoTexto(passos);
+  if (partes.length >= 2) {
+    const brutas = [];
+    for (const p of partes) {
+      if (linhaEhRotuloChamado(p) || passoEhPlaceholder(p)) continue;
+      const corpo = objetivarFrase(p);
+      if (!corpo || passoEhColagemGherkin(corpo)) continue;
+      brutas.push(corpo);
+    }
+    if (brutas.length >= 2 && brutas.length <= maxSlots + 1) {
+      return acoesParaLinhasGherkin(brutas.slice(0, maxSlots));
+    }
+  }
+
   const chunks = passosParaStepsGherkinComContinuacao(passos, opts);
   const first = chunks[0] || [];
   return first.slice(0, maxLinhas);
@@ -1682,11 +1774,14 @@ function sanitizarFeatureBdd(feature) {
       continue;
     }
 
-    if (/^\s*então\s+/i.test(trimmed) && trimmed.length < 140) {
-      const ev = entaoVerificavel(trimmed.replace(/^\s*então\s+/i, ''));
-      if (ev) {
-        out.push(`  Então ${ev}`);
-        continue;
+    if (/^\s*ent[aã]o\s+/i.test(trimmed)) {
+      const corpo = trimmed.replace(/^\s*ent[aã]o\s+/i, '');
+      if (!fraseEhIncompleta(corpo)) {
+        const ev = entaoVerificavel(corpo);
+        if (ev && !fraseEhIncompleta(ev)) {
+          out.push(`  Então ${ev}`);
+          continue;
+        }
       }
     }
 
@@ -1725,6 +1820,9 @@ module.exports = {
   linhaEhRotuloChamado,
   nomeFuncionalidadeCurto,
   entaoVerificavel,
+  fraseEhIncompleta,
+  passoEhColagemGherkin,
+  MAX_ENTAO_CHARS,
   primeiraFrase,
   objetivarFrase,
   passoGherkin,
@@ -1737,6 +1835,7 @@ module.exports = {
   maxEPorCenario,
   maxTotalEPorCenario,
   extrairPassosDoTexto,
+  desconcatenarPassosColados,
   mergePassosFontes,
   parseCenariosDevBlocos,
   cenarioQaAPartirDoDev,
