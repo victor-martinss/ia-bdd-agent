@@ -194,7 +194,7 @@ async function scanAndProcessQaQueue(tasks, forceSet, newInQueueSet, onProgress,
         ],
         quiet: false,
       });
-      if (result.crm.ok > 0) {
+      if (result.crm.ok > 0 || (result.crm.linkedQa && result.crm.linkedQa > 0)) {
         generated += 1;
         printGeneratedSuccess(row, { field: result.crm.lastField });
       } else if (result.crm.failed > 0) {
@@ -203,10 +203,11 @@ async function scanAndProcessQaQueue(tasks, forceSet, newInQueueSet, onProgress,
           'Falha ao gravar cenários no CRM (verifique campo UF e entityTypeId do card)'
         );
       } else if (result.processed > 0 || result.crm.skipped > 0) {
-        printCrmNotUpdated(
-          row,
-          'Card sem descrição/Dev/evidências — BDD não enviado ao campo Cenários QA'
-        );
+        const motivo =
+          result.crm.linkedQa > 0
+            ? 'BDD gravado em card(s) QA vinculado(s) (BITRIX_BDD_PUSH_TARGET=linked)'
+            : 'BDD gerado sem gravação no CRM (sem cenários válidos, card Dev-only ou vínculo QA ausente)';
+        printCrmNotUpdated(row, motivo);
       }
     } catch (e) {
       printGeneratedError(id, e.message || String(e));

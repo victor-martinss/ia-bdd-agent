@@ -139,7 +139,7 @@ function buildStructuredBdd(title, ctx) {
         out.push('');
       }
     }
-    if (blocosDev.length === 0 && !/cenário\s*:/i.test(out.join('\n'))) {
+    if (blocosDev.length === 0 && !/cen[aá]rio\s*(?:\d+\s*)?:/i.test(out.join('\n'))) {
       const { cenariosSmokeAPartirDoTitulo } = require('../utils/bdd-gherkin');
       for (const linhas of cenariosSmokeAPartirDoTitulo(ctx, nomeFuncionalidade)) {
         out.push(...linhas);
@@ -201,18 +201,32 @@ function buildStructuredBdd(title, ctx) {
   });
 }
 
+function assertiveRefineDevEnabled(ctx) {
+  if (process.env.BDD_ASSERTIVE_REFINE_DEV === '0') return false;
+  if (process.env.BDD_ASSERTIVE_REFINE_DEV === '1') return true;
+  return ctx._fontes === 'assertive';
+}
+
 function finalizarFeatureBdd(feature, ctx, meta = {}) {
   if (!feature) return feature;
-  const { repararFeatureGherkinDesconexo, assegurarCenariosCompletos } = require('../utils/bdd-gherkin-structure');
-  const { planificarFeatureBdd, plannerEnabled } = require('../utils/bdd-scenario-planner');
+  const {
+    repararFeatureGherkinDesconexo,
+    assegurarCenariosCompletos,
+    repararAssercoesColadasNaFeature,
+    corrigirQuandoUsuarioArtigo,
+  } = require('../utils/bdd-gherkin-structure');
+  const { planificarFeatureBdd } = require('../utils/bdd-scenario-planner');
   const { numerarCenariosNaFeature } = require('../utils/bdd-scenario-numbering');
   const reparado = repararFeatureGherkinDesconexo(feature, ctx);
+  const semTracos = repararAssercoesColadasNaFeature(reparado);
   const { rigorizarFeatureBdd } = require('../utils/bdd-rigor');
-  const rigor = rigorizarFeatureBdd(reparado, ctx);
+  const rigor = rigorizarFeatureBdd(semTracos, ctx);
   const completo = assegurarCenariosCompletos(rigor, ctx);
   const planificado = planificarFeatureBdd(completo, ctx, meta);
-  if (plannerEnabled()) return planificado;
-  return numerarCenariosNaFeature(planificado);
+  const numerado = numerarCenariosNaFeature(planificado);
+  let final = repararAssercoesColadasNaFeature(numerado);
+  final = repararAssercoesColadasNaFeature(final);
+  return corrigirQuandoUsuarioArtigo(final);
 }
 
 function llmRefineEnabled() {
@@ -278,7 +292,9 @@ function montarInputLlm(title, ctx) {
     '- PROIBIDO inventar: telas, botões, mensagens ou dados que não estejam no chamado/Dev/evidências.',
     '- PROIBIDO: "sistema em operação", "fluxo principal do chamado", "alinhado à regra de negócio", colar texto do Dev em linha E.',
     '- Cada Então = frase do resultado esperado/obtido ou do Então do bloco Dev (paráfrase curta).',
-    '- Cada Quando/E = ação concreta dos passos NGF ou do Dev (abrir laudário, comparar protocolo, etc.).'
+    '- Cada Quando/E = ação concreta dos passos NGF ou do Dev (abrir laudário, comparar protocolo, etc.).',
+    '- PROIBIDO juntar asserções com " - " na mesma linha; use um Então por critério verificável.',
+    '- Gemini analisou imagens/vídeos (se houver); OpenAI sintetiza texto — use ambos sem inventar fatos.'
   );
 
   if (ctx.resumoObjetivo) partes.push('\nResumo objetivo do teste:\n' + ctx.resumoObjetivo);
@@ -417,8 +433,15 @@ async function generateBDD(title, item) {
   const ngfRich = ctxTemCamposEstruturados(ctx);
   const titleOnly =
     !ngfRich && blocosDev.length === 0 && !!limparTexto(ctx.titulo);
+  const assertiveRefine =
+    assertiveRefineDevEnabled(ctx) && blocosDev.length > 0;
 
-  if (llmOn && llmRefineEnabled() && !forceLlm && (ngfRich || titleOnly)) {
+  if (
+    llmOn &&
+    llmRefineEnabled() &&
+    !forceLlm &&
+    (ngfRich || titleOnly || assertiveRefine)
+  ) {
     try {
       if (process.env.DEBUG_BITRIX === '1') {
         console.log('[BDD] Refino OpenAI (texto) sobre rascunho estruturado (bdd-refine.txt)');
@@ -435,7 +458,12 @@ async function generateBDD(title, item) {
     }
   }
 
-  if (blocosDev.length > 0 && process.env.BDD_PREFER_STRUCTURED !== '0' && !forceLlm) {
+  if (
+    blocosDev.length > 0 &&
+    process.env.BDD_PREFER_STRUCTURED !== '0' &&
+    !forceLlm &&
+    !assertiveRefine
+  ) {
     return feature;
   }
 
@@ -465,10 +493,13 @@ function filtrarRespostaBdd(texto, ctx = {}, meta = {}) {
   const fence = t.match(/```(?:gherkin|feature)?\s*([\s\S]*?)```/i);
   if (fence && fence[1]) t = fence[1].trim();
 
-  t = t.replace(/^[\s\S]*?(?=funcionalidade\s*:|cenário\s*:|#\s*cenários)/i, '');
+  t = t.replace(
+    /^[\s\S]*?(?=funcionalidade\s*:|cen[aá]rio\s*(?:\d+\s*)?:|#\s*cenários)/i,
+    ''
+  );
 
   const idxFunc = t.search(/funcionalidade\s*:/i);
-  const idxCen = t.search(/cenário\s*:/i);
+  const idxCen = t.search(/cen[aá]rio\s*(?:\d+\s*)?:/i);
   const idxHash = t.search(/^#\s*cenários/im);
   const start =
     idxHash >= 0 ? idxHash : idxFunc >= 0 ? idxFunc : idxCen >= 0 ? idxCen : 0;

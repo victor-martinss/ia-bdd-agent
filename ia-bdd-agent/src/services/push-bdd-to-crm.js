@@ -271,6 +271,26 @@ function classifyBddQaItemAction(detail) {
     };
   }
 
+  try {
+    const { featurePrecisaNumeracao, featureSemCenarios } = require('../utils/bdd-scenario-numbering');
+    if (featureSemCenarios(text)) {
+      return {
+        action: 'generate',
+        fieldKey,
+        reason: 'campo QA sem cenários Gherkin — gerar BDD',
+      };
+    }
+    if (featurePrecisaNumeracao(text)) {
+      return {
+        action: 'generate',
+        fieldKey,
+        reason: 'cenários QA sem numeração sequencial (Cenário 1:, 2:, …) — regerar',
+      };
+    }
+  } catch {
+    /* ignore */
+  }
+
   return {
     action: 'skip_filled',
     fieldKey,
@@ -305,6 +325,12 @@ function bddPodePublicarNoCrm(bdd) {
   if (!t) return false;
   if (/^#\s*Não foi possível gerar BDD/i.test(t)) return false;
   if (/^#\s*Erro ao gerar BDD/i.test(t)) return false;
+  try {
+    const { featureSemCenarios } = require('../utils/bdd-scenario-numbering');
+    if (featureSemCenarios(t)) return false;
+  } catch {
+    /* ignore */
+  }
   return true;
 }
 

@@ -16,6 +16,32 @@ function splitCriteriosResultado(texto) {
 }
 
 /**
+ * Separa asserções coladas com " - " (comum em Cenários Dev inline).
+ * Ex.: "não devem aparecer abas - O título deve ser X - A coluna Y"
+ */
+function splitAssercoesColadas(texto) {
+  const t = String(texto || '').trim();
+  if (!t || !/\s+-\s+/.test(t)) return t ? [t] : [];
+
+  const lookahead =
+    /(?:Não|Nao|Somente|Exames|Existem|Existe|Estou|Clico|Gerencio|O\s|A\s|Os\s|As\s|Nenhum|Nenhuma|Deve|O título|A coluna|A listagem|A tabela|O botão|O documento|A página|Não devem|Não deve|O usuário|As abas|O filtro|O padrão|O texto|A API|[A-ZÁÉÍÓÚÂÊÔÃÕÇ])/;
+
+  const porTraco = t
+    .split(new RegExp(`\\s+-\\s+(?=${lookahead.source})`))
+    .map((p) => p.replace(/[.…]+$/g, '').trim())
+    .filter((p) => p.length >= 6);
+
+  if (porTraco.length > 1) return porTraco;
+
+  const porEspaco = t
+    .split(/\s{2,}(?=[A-ZÁÉÍÓÚÂÊÔÃÕÇ])/)
+    .map((p) => p.trim())
+    .filter((p) => p.length >= 8);
+
+  return porEspaco.length > 1 ? porEspaco : [t];
+}
+
+/**
  * Extrai critérios de validação assertivos a partir dos campos do chamado.
  * @param {object} ctx
  * @returns {{ titulo: string, entao: string, origem: string }[]}
@@ -121,6 +147,8 @@ function formatarValidacoesParaPrompt(ctx) {
 
 module.exports = {
   splitCriteriosResultado,
+  splitAssercoesColadas,
+  splitAssercoesColadas,
   extrairValidacoesExatas,
   entaoAssertivoDoContexto,
   formatarValidacoesParaPrompt,

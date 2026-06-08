@@ -5,13 +5,18 @@ const { flattenItem } = require('../agents/parser');
 const { qaBddFieldTextFromFlat } = require('../services/push-bdd-to-crm');
 const { cleanGherkinForCrmField } = require('./bdd-crm-merge');
 const { parseFeatureEmCenarios } = require('./bdd-scenario-planner');
+const {
+  numerarCenariosNaFeature,
+  featurePrecisaNumeracao,
+} = require('./bdd-scenario-numbering');
+const { isLinhaCenario } = require('./bdd-scenario-numbering');
 
 function contarCenariosGherkin(text) {
   if (!text || typeof text !== 'string') return 0;
   const { cenarios } = parseFeatureEmCenarios(text);
   if (cenarios.length) return cenarios.length;
-  const m = text.match(/^\s*cenário\s*:/gim);
-  return m ? m.length : 0;
+  const linhas = text.split(/\r?\n/).filter((l) => isLinhaCenario(l.trim()));
+  return linhas.length;
 }
 
 function mirrorFromParentEnabled() {
@@ -50,6 +55,8 @@ function resolveCanonicalBddForLinked(parentDetail, generatedBdd) {
     bdd = cleanGherkinForCrmField(bdd) || bdd;
   }
 
+  bdd = numerarCenariosNaFeature(bdd);
+
   return {
     bdd,
     source,
@@ -71,6 +78,7 @@ function linkedCardNeedsBddSync(linkedExistingText, canonicalBdd) {
   if (nCanon <= 0) return false;
   if (nLinked < nCanon) return true;
   if (nLinked === 0 && nCanon > 0) return true;
+  if (featurePrecisaNumeracao(linkedExistingText)) return true;
   const norm = (s) =>
     String(s || '')
       .replace(/\s+/g, ' ')

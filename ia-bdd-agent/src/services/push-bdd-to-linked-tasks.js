@@ -576,7 +576,7 @@ async function pushBddToLinkedBitrixTasks(crmItemId, bdd, options = {}) {
   if (!bddPodePublicarNoCrm(bdd)) {
     return {
       skipped: true,
-      reason: 'bdd inválido',
+      reason: 'BDD sem cenários válidos para gravar',
       updated: 0,
       taskIds: [],
     };
@@ -586,7 +586,13 @@ async function pushBddToLinkedBitrixTasks(crmItemId, bdd, options = {}) {
     return { skipped: true, reason: 'BITRIX_WEBHOOK', updated: 0, taskIds: [] };
   }
 
-  const valor = truncarParaCampoUf(bdd.trim());
+  const { cleanGherkinForCrmField, cleanCrmWriteEnabled } = require('../utils/bdd-crm-merge');
+  const { numerarCenariosNaFeature } = require('../utils/bdd-scenario-numbering');
+  let texto = numerarCenariosNaFeature(bdd.trim());
+  if (cleanCrmWriteEnabled()) {
+    texto = cleanGherkinForCrmField(texto) || texto;
+  }
+  const valor = truncarParaCampoUf(texto);
   const taskIds = await listLinkedTaskIdsForCrmItem(crmItemId, detail);
 
   if (!taskIds.length) {

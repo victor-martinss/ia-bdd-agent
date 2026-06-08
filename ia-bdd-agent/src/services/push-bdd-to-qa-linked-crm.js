@@ -179,7 +179,16 @@ async function pushBddToQaLinkedCrmItems(sourceItemId, bdd, options = {}) {
     return { skipped: true, reason: 'BITRIX_PUSH_BDD_TO_QA_LINKED_CRM=0', updated: 0, itemIds: [], skippedAlreadyFilled: 0, failed: 0 };
   }
   if (!bddPodePublicarNoCrm(bdd) || !BASE_URL) {
-    return { skipped: true, updated: 0, itemIds: [], skippedAlreadyFilled: 0, failed: 0 };
+    return {
+      skipped: true,
+      reason: !bddPodePublicarNoCrm(bdd)
+        ? 'BDD sem cenários válidos para gravar'
+        : 'BITRIX_WEBHOOK ausente',
+      updated: 0,
+      itemIds: [],
+      skippedAlreadyFilled: 0,
+      failed: 0,
+    };
   }
 
   const srcDetail = detail || (await getTaskDetail(sourceItemId));

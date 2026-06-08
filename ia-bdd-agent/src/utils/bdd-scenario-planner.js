@@ -267,6 +267,11 @@ function maxTotalCenarios(ctx = {}, meta = {}) {
   return Infinity;
 }
 
+function cenarioProtegidoDev(cenario, ctx) {
+  if (cenario._origem === 'dev_faltante') return true;
+  return cenarioEspelhaDev(cenario, ctx);
+}
+
 function removerCenariosRedundantes(cenarios, ctx) {
   const limiar =
     Number.parseFloat(process.env.BDD_DEDUP_SIMILARITY || '0.62') || 0.62;
@@ -282,6 +287,15 @@ function removerCenariosRedundantes(cenarios, ctx) {
     let duplicata = false;
     for (const prev of kept) {
       if (!cenariosSaoRedundantes(cen, prev, limiar)) continue;
+
+      const cenProtegido = cenarioProtegidoDev(cen, ctx);
+      const prevProtegido = cenarioProtegidoDev(prev, ctx);
+      if (cenProtegido && !prevProtegido) break;
+      if (!cenProtegido && prevProtegido) {
+        duplicata = true;
+        removidos.push(cen.titulo);
+        break;
+      }
 
       const scoreCen = classificarCenario(cen, ctx);
       const scorePrev = classificarCenario(prev, ctx);
@@ -299,6 +313,37 @@ function removerCenariosRedundantes(cenarios, ctx) {
   }
 
   return { cenarios: kept, removidos };
+}
+
+function priorizarCenariosParaCap(cenarios, ctx, cap) {
+  if (!Number.isFinite(cap) || cenarios.length <= cap) return cenarios;
+  const dev = [];
+  const outros = [];
+  for (const c of cenarios) {
+    if (cenarioProtegidoDev(c, ctx)) dev.push(c);
+    else outros.push(c);
+  }
+  const keep = [...dev];
+  for (const c of outros) {
+    if (keep.length >= cap) break;
+    keep.push(c);
+  }
+  return keep.slice(0, cap);
+}
+
+function assegurarMinimoCenariosDev(todos, ctx, meta = {}) {
+  const qtdDev = meta.qtdDev ?? contarBlocosDev(ctx, meta);
+  if (!qtdDev || process.env.BDD_ENSURE_DEV_MIRROR === '0') return todos;
+
+  const espelhos = todos.filter((c) => cenarioEspelhaDev(c, ctx) || c._origem === 'dev_faltante');
+  if (espelhos.length >= qtdDev) return todos;
+
+  const faltantes = gerarCenariosFaltantesDoDev(ctx, todos);
+  if (!faltantes.length) return todos;
+
+  const titulos = new Set(todos.map((c) => normalizarTexto(c.titulo)));
+  const novos = faltantes.filter((c) => !titulos.has(normalizarTexto(c.titulo)));
+  return novos.length ? [...todos, ...novos] : todos;
 }
 
 function devJaCobreTexto(blob, padroes) {
@@ -529,13 +574,17 @@ function planificarFeatureBdd(feature, ctx, meta = {}) {
   let todos = ordenarCenarios([...baseComDev, ...lacunas], ctx);
   const { cenarios: finais, removidos: remFinal } = removerCenariosRedundantes(todos, ctx);
   removidos.push(...remFinal);
-  todos = finais;
+  todos = assegurarMinimoCenariosDev(finais, ctx, meta);
   const cap = maxTotalCenarios(ctx, meta);
   if (Number.isFinite(cap) && todos.length > cap) {
-    const removidosCap = todos.slice(cap).map((c) => c.titulo);
-    todos = todos.slice(0, cap);
+    const cortados = priorizarCenariosParaCap(todos, ctx, cap);
+    const removidosCap = todos
+      .filter((c) => !cortados.includes(c))
+      .map((c) => c.titulo);
+    todos = cortados;
     removidos.push(...removidosCap);
   }
+  todos = assegurarMinimoCenariosDev(todos, ctx, meta);
 
   const funcIdx = header.findIndex((l) => /^funcionalidade\s*:/i.test(l.trim()));
   const headerLimpo = header.filter(

@@ -77,6 +77,25 @@ function extrairNumeroCenario(linha) {
   return m ? Number.parseInt(m[1], 10) : null;
 }
 
+/** Campo CRM tem cenários mas sem numeração sequencial (Cenário 1:, 2:, …). */
+function featurePrecisaNumeracao(text) {
+  if (!numeracaoHabilitada() || !text) return false;
+  const linhas = String(text)
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => isLinhaCenario(l));
+  if (!linhas.length) return false;
+  return linhas.some((l) => !/^cen[aá]rio\s+\d+\s*:/i.test(l));
+}
+
+/** Feature só com cabeçalho Funcionalidade, sem blocos Cenário parseáveis. */
+function featureSemCenarios(text) {
+  if (!text || !String(text).trim()) return true;
+  const parse =
+    require('./bdd-scenario-planner').parseFeatureEmCenarios;
+  return parse(String(text)).cenarios.length === 0;
+}
+
 module.exports = {
   numeracaoHabilitada,
   isLinhaCenario,
@@ -86,4 +105,6 @@ module.exports = {
   numerarCenariosObjeto,
   numerarCenariosNaFeature,
   extrairNumeroCenario,
+  featurePrecisaNumeracao,
+  featureSemCenarios,
 };

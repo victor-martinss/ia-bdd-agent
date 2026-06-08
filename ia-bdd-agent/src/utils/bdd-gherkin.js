@@ -385,7 +385,7 @@ function objetivarFrase(frase, maxLen = MAX_PASSO_CHARS) {
   if (!f) return '';
 
   const verbosAcao =
-    /^(informa|clica|acessa|envia|visualiza|preenche|seleciona|abre|cadastra|exporta|tenta|valida|confirma|realiza|inicia|sai|alterna|fecha|entra|configura|cria|aguarda|compara|verifica|anota|aplica|registra|abre|selecionar|configurar|criar|aguardar|comparar|verificar|anotar|aplicar|registrar|cadastrar|enviar|clicar|informar|acessar|visualizar|preencher|abrir|exportar|validar|confirmar|iniciar|sair|alternar|fechar|entrar|realizar)/i;
+    /^(informa|clica|acessa|envia|visualiza|visualizo|preenche|seleciona|seleciono|abre|cadastra|exporta|tenta|valida|confirma|realiza|inicia|sai|alterna|fecha|entra|configura|cria|aguarda|compara|verifica|anota|aplica|registra|carrega|carrego|filtra|filtro|abre|selecionar|configurar|criar|aguardar|comparar|verificar|anotar|aplicar|registrar|cadastrar|enviar|clicar|informar|acessar|visualizar|preencher|abrir|exportar|validar|confirmar|iniciar|sair|alternar|fechar|entrar|realizar)/i;
   if (verbosAcao.test(f)) {
     f = f
       .replace(/^cadastrar\b/i, 'cadastra')
@@ -423,8 +423,15 @@ function objetivarFrase(frase, maxLen = MAX_PASSO_CHARS) {
     }
   }
 
-  if (/^(está|esta|são|é|existe|há|permanece|continua)/i.test(f) && !/^o\s+usuário/i.test(f)) {
-    f = `o usuário ${f.charAt(0).toLowerCase()}${f.slice(1)}`;
+  if (
+    /^(está|esta|são|é|existem|há|permanece|continua)/i.test(f) &&
+    !/^o\s+usuário/i.test(f)
+  ) {
+    if (/^exist(em|e)\s/i.test(f)) {
+      /* pré-condição: "E existe/existem …" — sem prefixo o usuário */
+    } else {
+      f = `o usuário ${f.charAt(0).toLowerCase()}${f.slice(1)}`;
+    }
   }
 
   f = limitarPalavras(f);
@@ -452,11 +459,25 @@ function passoGherkin(tipo, texto) {
   };
   const prefix = map[tipo.toLowerCase()] || 'E';
   if (prefix === 'E') {
-    const eCorpo = /^o\s+usu[aá]rio\s+/i.test(corpo) ? corpo : `o usuário ${corpo}`;
+    let eCorpo = corpo;
+    if (
+      !/^(o|a|os|as|sou|estou|existem|existe|gerencio|há)\s/i.test(eCorpo) &&
+      !/^o\s+usu[aá]rio\s+/i.test(eCorpo)
+    ) {
+      eCorpo = `o usuário ${eCorpo}`;
+    }
+    eCorpo = eCorpo
+      .replace(/\bo usuário\s+acesso\b/i, 'o usuário acessa')
+      .replace(/\bo usuário\s+clico\b/i, 'o usuário clica')
+      .replace(/\bo usuário\s+confirmo\b/i, 'o usuário confirma')
+      .replace(/^o usuário\s+(existem|existe)\s/i, '$1 ');
     return `    E ${eCorpo}`;
   }
   if (prefix === 'Dado que') return `  Dado que ${corpo}`;
   if (prefix === 'Quando') {
+    if (/^(a|o|os|as)\s+/i.test(corpo) && !/^o\s+usu[aá]rio\s+/i.test(corpo)) {
+      return `  Quando ${corpo}`;
+    }
     let q = /^o\s+usu[aá]rio\s+/i.test(corpo) ? corpo : `o usuário ${corpo}`;
     q = q
       .replace(/\bo usuário\s+envio\b/i, 'o usuário envia')
@@ -464,7 +485,13 @@ function passoGherkin(tipo, texto) {
       .replace(/\bo usuário\s+abro\b/i, 'o usuário abre')
       .replace(/\bo usuário\s+comparo\b/i, 'o usuário compara')
       .replace(/\bo usuário\s+aguardo\b/i, 'o usuário aguarda')
-      .replace(/\bo usuário\s+adicionar\b/i, 'o usuário adiciona');
+      .replace(/\bo usuário\s+adicionar\b/i, 'o usuário adiciona')
+      .replace(/\bo usuário\s+carrego\b/i, 'o usuário carrega')
+      .replace(/\bo usuário\s+seleciono\b/i, 'o usuário seleciona')
+      .replace(/\bo usuário\s+visualizo\b/i, 'o usuário visualiza')
+      .replace(/\bo usuário\s+clico\b/i, 'o usuário clica')
+      .replace(/\bo usuário\s+confirmo\b/i, 'o usuário confirma')
+      .replace(/\bo usuário\s+(a|o|os|as)\s+/i, '$1 ');
     return `  Quando ${q}`;
   }
   return `  Então ${corpo}`;
@@ -1029,12 +1056,32 @@ function parseCenariosDevBlocos(texto) {
     .trim();
   if (!limparTexto(bruto)) return [];
 
-  const porCenario = bruto.split(/(?=^\s*(?:cenário|cenario)\s*:)/gim).filter((c) => limparTexto(c));
-  if (porCenario.length >= 1 && /(?:cenário|cenario)\s*:/i.test(bruto)) {
-    return porCenario.map((chunk) => parseDevChunk(chunk));
+  // "Cenário 1: … Cenário 2: …" no mesmo parágrafo (campo Dev costuma vir numa linha só)
+  if (/(?:cenário|cenario)\s*\d+\s*:/i.test(bruto)) {
+    const porNumInline = bruto
+      .split(/(?=(?:cenário|cenario)\s*\d+\s*:)/i)
+      .map((c) => c.replace(/^\s*---+\s*/g, '').trim())
+      .filter((c) => limparTexto(c));
+    if (porNumInline.length > 1) {
+      return porNumInline.map((chunk) => parseDevChunk(chunk));
+    }
   }
+
+  const porCenario = bruto
+    .split(/(?=^\s*(?:cenário|cenario)\s*(?:\d+\s*)?:)/gim)
+    .filter((c) => limparTexto(c));
   if (porCenario.length > 1) {
     return porCenario.map((chunk) => parseDevChunk(chunk));
+  }
+
+  // "Cenário 1 Ação: … Resultado - …" (com ou sem quebra de linha entre blocos)
+  if (/(?:cenário|cenario)\s*\d+\s+a[cç][ãa]o\s*:/i.test(bruto)) {
+    const porAcaoInline = bruto
+      .split(/(?=(?:cenário|cenario)\s*\d+\s+a[cç][ãa]o\s*:)/i)
+      .filter((c) => limparTexto(c));
+    if (porAcaoInline.length >= 1) {
+      return porAcaoInline.map((chunk) => parseDevChunkAcaoResultado(chunk));
+    }
   }
 
   const porMarcador = bruto.split(/(?=\[\s*cenário|\{\s*cenário)/gi).filter((c) => limparTexto(c));
@@ -1261,27 +1308,121 @@ function parseCenariosDevMarkdown(bruto) {
   return blocos.length ? blocos : null;
 }
 
-/** Quando/Então já escritos no corpo do bloco Dev (parse markdown). */
+/** Converte **Given:** / **When:** / **Then:** inline em linhas separadas. */
+function normalizarGwtInline(body) {
+  return String(body || '')
+    .replace(/\*{0,2}\s*given\s*:\*{0,2}/gi, '\nGiven: ')
+    .replace(/\*{0,2}\s*when\s*:\*{0,2}/gi, '\nWhen: ')
+    .replace(/\*{0,2}\s*then\s*:\*{0,2}/gi, '\nThen: ');
+}
+
+/** Quando/Então já escritos no corpo do bloco Dev (Gherkin ou Given/When/Then). */
 function extrairQuandoEntaoDoCorpo(body) {
-  const lines = String(body || '')
+  const lines = normalizarGwtInline(body)
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter(Boolean);
   let quando = null;
   let entao = null;
+  /** @type {string[]} */
+  let entaoList = [];
+  const eSteps = [];
+
   for (const l of lines) {
     const mq = l.match(/^quando\s+(.+)$/i);
     if (mq) {
       const norm = normalizarLinhaGherkin(`Quando ${mq[1]}`);
       quando = norm || passoGherkin('Quando', mq[1]);
+      continue;
     }
     const me = l.match(/^ent[aã]o\s+(.+)$/i);
     if (me) {
       const norm = normalizarLinhaGherkin(`Então ${me[1]}`);
-      entao = norm || (entaoVerificavel(me[1]) ? `  Então ${entaoVerificavel(me[1])}` : null);
+      entao =
+        norm ||
+        (entaoVerificavel(me[1]) ? `  Então ${entaoVerificavel(me[1])}` : null);
+      continue;
+    }
+
+    const mg = l.match(/^\*{0,2}\s*given\s*:\*{0,2}\s*(.+)$/i);
+    if (mg) {
+      const givenBlob = limparMarkdownCru(mg[1]).trim();
+      const { splitAssercoesColadas } = require('./bdd-validacoes');
+      const frases = splitAssercoesColadas(givenBlob)
+        .map((f) => objetivarFrase(f, 100))
+        .filter(Boolean);
+      for (const prep of frases.length ? frases : [objetivarFrase(givenBlob, 100)].filter(Boolean)) {
+        const eText =
+          /^(o|a|os|as|um|uma|sou|estou|existem|gerencio|há)\s/i.test(prep) || /^o\s+usu[aá]rio\s+/i.test(prep)
+            ? prep
+            : `o usuário ${prep}`;
+        eSteps.push(`    E ${eText}`);
+      }
+      continue;
+    }
+    const mw = l.match(/^\*{0,2}\s*when\s*:\*{0,2}\s*(.+)$/i);
+    if (mw) {
+      const prep = objetivarFrase(limparMarkdownCru(mw[1]), 100);
+      if (prep) {
+        quando = passoGherkin('Quando', prep) || `  Quando o usuário ${prep}`;
+      }
+      continue;
+    }
+    const mt = l.match(/^\*{0,2}\s*then\s*:\*{0,2}\s*(.+)$/i);
+    if (mt) {
+      const thenBlob = limparMarkdownCru(mt[1]).trim();
+      const { splitAssercoesColadas } = require('./bdd-validacoes');
+      const frasesThen = splitAssercoesColadas(thenBlob)
+        .map((f) => entaoVerificavel(f))
+        .filter(Boolean);
+      const ev = frasesThen[0] || entaoVerificavel(thenBlob);
+      if (ev) entao = `  Então ${ev}`;
+      if (frasesThen.length > 1) {
+        entaoList = frasesThen.map((f) => `  Então ${f}`);
+      }
     }
   }
-  return { quando, entao };
+
+  if (!quando || !entao) {
+    const blob = lines.join(' ');
+    const mAr = blob.match(
+      /a[cç][ãa]o\s*:\s*(.+?)\s+resultado\s*[-–—:]\s*(.+)$/i
+    );
+    if (mAr) {
+      const acao = limparMarkdownCru(mAr[1]).trim();
+      const res = limparMarkdownCru(mAr[2]).trim();
+      const prep = objetivarFrase(acao, 100) || acao;
+      if (!quando && prep) {
+        quando = passoGherkin('Quando', prep) || `  Quando o usuário ${prep}`;
+      }
+      if (!entao && res) {
+        const ev = entaoVerificavel(res);
+        if (ev) entao = `  Então ${ev}`;
+      }
+    }
+  }
+
+  if (!entaoList.length && entao) entaoList = [entao];
+  return { quando, entao, entaoList, eSteps };
+}
+
+/** Formato Dev: "Cenário 1 Ação: … Resultado - …" (uma linha ou bloco). */
+function parseDevChunkAcaoResultado(chunk) {
+  const bruto = String(chunk || '').replace(/\s+/g, ' ').trim();
+  const m = bruto.match(
+    /^(?:cenário|cenario)\s*(\d+)\s+a[cç][ãa]o\s*:\s*(.+?)\s+resultado\s*[-–—:]\s*(.+)$/i
+  );
+  if (!m) return parseDevChunk(chunk);
+
+  const acao = limparMarkdownCru(m[2]).trim();
+  const resultado = limparMarkdownCru(m[3]).trim();
+  const title = acao.slice(0, 120) || `Cenário ${m[1]}`;
+  const body = [`Ação: ${acao}`, `Resultado: ${resultado}`].join('\n');
+  return {
+    title,
+    body,
+    lines: [body],
+  };
 }
 
 function parseDevChunk(chunk, tituloFallback = null) {
@@ -1289,10 +1430,21 @@ function parseDevChunk(chunk, tituloFallback = null) {
   const first = (lines.find((l) => l.trim()) || '').trim();
   let title = tituloFallback;
 
-  const mCen = first.match(/^(?:cenário|cenario)\s*:\s*(.+)$/i);
+  const mCen = first.match(/^(?:cenário|cenario)\s*(?:\d+\s*)?:\s*(.+)$/i);
   if (mCen) {
-    title = mCen[1].trim();
-    lines.shift();
+    let rest = mCen[1].trim().replace(/\s*---+\s*$/g, '');
+    const corteCorpo = rest.search(
+      /\*{0,2}\s*(?:given|when|then|a[cç][ãa]o|resultado)\s*:/i
+    );
+    if (corteCorpo > 8) {
+      title = rest.slice(0, corteCorpo).trim();
+      const corpoInline = rest.slice(corteCorpo).trim();
+      lines.shift();
+      if (corpoInline) lines.unshift(corpoInline);
+    } else {
+      title = rest;
+      lines.shift();
+    }
   } else {
     const mMarc = first.match(/\[\s*cenário[^\]]*\]\s*:?\s*(.*)$/i);
     if (mMarc) {
@@ -1326,12 +1478,20 @@ function cenariosQaAPartirDoDev(bloco, ctx, nomeFuncionalidade) {
   const refDev = bloco.title || null;
 
   const passosCorpo = extrairQuandoEntaoDoCorpo(bloco.body);
-  if (passosCorpo.quando && passosCorpo.entao) {
-    return dividirCenarioCompletoPorMaxE(
-      titulo,
-      [...montarDadosIniciais(ctx), passosCorpo.quando, passosCorpo.entao],
-      { refDev }
-    );
+  if (passosCorpo.quando && (passosCorpo.entao || passosCorpo.entaoList?.length)) {
+    const entoes =
+      passosCorpo.entaoList?.length > 0
+        ? passosCorpo.entaoList
+        : passosCorpo.entao
+          ? [passosCorpo.entao]
+          : [];
+    const corpo = [
+      ...montarDadosIniciais(ctx),
+      ...(passosCorpo.eSteps || []),
+      passosCorpo.quando,
+      ...entoes,
+    ];
+    return dividirCenarioCompletoPorMaxE(titulo, corpo, { refDev });
   }
 
   const { entaoParaBlocoDev } = require('./bdd-rigor');

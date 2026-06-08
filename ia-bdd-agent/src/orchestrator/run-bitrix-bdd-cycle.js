@@ -51,7 +51,7 @@ async function runBitrixBddCycle(packageRoot, options = {}) {
   }
 
   let processed = 0;
-  const crm = { ok: 0, skipped: 0, failed: 0, lastField: null };
+  const crm = { ok: 0, skipped: 0, failed: 0, linkedQa: 0, lastField: null };
   const linkedTasks = { updated: 0, failed: 0 };
   for (const task of tasks) {
     try {
@@ -214,6 +214,15 @@ async function runBitrixBddCycle(packageRoot, options = {}) {
       const qaLinkResult = linkedPush.qa;
       const childCrmResult = linkedPush.child;
       const linkResult = linkedPush.tasks;
+      if (qaLinkResult.updated) {
+        crm.linkedQa += qaLinkResult.updated;
+        if (!gravarNoCardPrincipal) {
+          crm.ok += qaLinkResult.updated;
+        }
+      }
+      if (childCrmResult.updated && !gravarNoCardPrincipal) {
+        crm.ok += childCrmResult.updated;
+      }
       linkedTasks.updated += linkedPush.updated || 0;
       linkedTasks.failed += linkedPush.failed || 0;
 

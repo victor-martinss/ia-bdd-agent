@@ -9,9 +9,14 @@ const {
   fraseEhIncompleta,
   passoEhColagemGherkin,
   objetivarFrase,
+  passoGherkin,
 } = require('./bdd-gherkin');
 const { entaoEhVago, passoEhVago } = require('./bdd-rigor');
-const { extrairValidacoesExatas, splitCriteriosResultado } = require('./bdd-validacoes');
+const {
+  extrairValidacoesExatas,
+  splitCriteriosResultado,
+  splitAssercoesColadas,
+} = require('./bdd-validacoes');
 const { isLinhaCenario, stripPrefixoNumericoCenario } = require('./bdd-scenario-numbering');
 
 function entaoEhIncompleto(corpo) {
@@ -117,7 +122,10 @@ function validarEstruturaFeatureGherkin(feature) {
   }
   if (!/funcionalidade\s*:/i.test(t)) motivos.push('sem Funcionalidade');
   if (/^\s*E\s+cen[aá]rio\s*:/im.test(t)) motivos.push('usa "E cenário" em vez de "Cenário"');
-  if (!/^\s*Cen[aá]rio\s*:/im.test(t)) motivos.push('sem linha "Cenário:" válida');
+  const temLinhaCenario = t
+    .split(/\r?\n/)
+    .some((l) => isLinhaCenario(l.trim()));
+  if (!temLinhaCenario) motivos.push('sem linha "Cenário:" válida');
 
   const blocos = extrairBlocosCenario(t);
   if (!blocos.length) motivos.push('nenhum cenário parseado');
@@ -425,6 +433,78 @@ function assegurarCenariosCompletos(feature, ctx = {}) {
   return texto ? `${texto}\n` : reparado;
 }
 
+/** Expande asserções coladas com " - " em linhas Então/E separadas. */
+function expandirLinhaComTracos(linha) {
+  const t = String(linha || '');
+  const m = t.match(/^(\s*)((?:Então|Entao|Mas|E|Quando))\s+(.+)$/i);
+  if (!m) return [linha];
+  const [, indent, kw, corpo] = m;
+  if (!/\s+-\s+/.test(corpo)) return [linha];
+
+  const partes = splitAssercoesColadas(corpo);
+  if (partes.length <= 1) return [linha];
+
+  const pad = indent || '  ';
+  const tipo = kw.toLowerCase();
+
+  if (tipo.startsWith('ent')) {
+    return partes
+      .map((p) => {
+        const ev = entaoVerificavel(p);
+        return ev && !entaoEhIncompleto(ev) ? `${pad}Então ${ev}` : null;
+      })
+      .filter(Boolean);
+  }
+  if (tipo === 'e') {
+    return partes
+      .map((p) => {
+        const obj = objetivarFrase(p, 120);
+        if (!obj) return null;
+        const eText =
+          /^(o|a|os|as|sou|estou|existem|gerencio|há)\s/i.test(obj) || /^o\s+usu[aá]rio\s+/i.test(obj)
+            ? obj
+            : `o usuário ${obj}`;
+        return `    E ${eText}`;
+      })
+      .filter(Boolean);
+  }
+  if (tipo === 'quando' && partes.length >= 2) {
+    const linhas = [];
+    const q0 = passoGherkin('Quando', partes[0]);
+    if (q0) linhas.push(q0);
+    for (const p of partes.slice(1)) {
+      const e = passoGherkin('E', p);
+      if (e) linhas.push(e);
+    }
+    return linhas.length ? linhas : [linha];
+  }
+  return [linha];
+}
+
+function corrigirQuandoUsuarioArtigo(feature) {
+  return String(feature || '').replace(
+    /^(\s*Quando\s+)o usuário\s+(a|o|os|as)\s+/gim,
+    '$1$2 '
+  );
+}
+
+function repararAssercoesColadasNaFeature(feature) {
+  if (!feature || !/\s+-\s+/.test(feature)) return feature;
+  const out = [];
+  for (const line of String(feature).split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (
+      /^\s*(então|entao|e|quando)\s+/i.test(trimmed) &&
+      /\s+-\s+/.test(trimmed)
+    ) {
+      out.push(...expandirLinhaComTracos(line));
+    } else {
+      out.push(line);
+    }
+  }
+  return corrigirQuandoUsuarioArtigo(out.join('\n'));
+}
+
 module.exports = {
   entaoEhIncompleto,
   fraseEhIncompleta,
@@ -433,6 +513,8 @@ module.exports = {
   extrairBlocosCenario,
   repararFeatureGherkinDesconexo,
   assegurarCenariosCompletos,
+  repararAssercoesColadasNaFeature,
+  corrigirQuandoUsuarioArtigo,
   entaoCompletoDoContexto,
   passosCompletosDoContexto,
 };

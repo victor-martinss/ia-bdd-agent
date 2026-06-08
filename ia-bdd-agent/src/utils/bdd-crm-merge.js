@@ -86,8 +86,13 @@ function fieldHasIaAutomationArtifacts(text) {
 function fieldHasMalformedLlmGherkin(text) {
   const t = normalizeNewlines(text);
   if (!t.trim()) return false;
+  const { isLinhaCenario } = require('./bdd-scenario-numbering');
+  const linhasCenario = t
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => isLinhaCenario(l));
   if (/^\s*E\s+cen[aá]rio\s*:/im.test(t)) return true;
-  if (!/^\s*Cen[aá]rio\s*:/im.test(t) && /cen[aá]rio\s*:/i.test(t)) return true;
+  if (!linhasCenario.length && /cen[aá]rio/i.test(t)) return true;
   if (/^\s*ent[aã]o\s+a\s+mensagem\s*$/im.test(t)) return true;
   if (/^\s*ent[aã]o\s+o\s+(sistema|comportamento|resultado)\s*$/im.test(t)) return true;
   if (fieldHasInternalAutomationComments(t)) return true;
@@ -98,7 +103,7 @@ function fieldHasMalformedLlmGherkin(text) {
     if (/^\s*(quando|ent[aã]o|e)\s+/i.test(lt) && passoGherkinTruncado(lt)) return true;
   }
 
-  if (/funcionalidade\s*:/i.test(t) || /^\s*cen[aá]rio\s*:/im.test(t)) {
+  if (/funcionalidade\s*:/i.test(t) || linhasCenario.length > 0) {
     try {
       const { validarEstruturaFeatureGherkin } = require('./bdd-gherkin-structure');
       const { ok } = validarEstruturaFeatureGherkin(t);
