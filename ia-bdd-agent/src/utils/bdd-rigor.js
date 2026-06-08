@@ -4,6 +4,8 @@ const {
   entaoVerificavel,
   passoEhColagemDescricao,
   passosParaStepsGherkin,
+  passoGherkin,
+  passosAPartirDoTitulo,
   fraseEhIncompleta,
 } = require('./bdd-gherkin');
 
@@ -79,7 +81,32 @@ function entaoParaBlocoDev(ctx, corpoBloco) {
     const ev = entaoVerificavel(bruto);
     if (ev && !entaoEhVago(ev)) return `  Então ${ev}`;
   }
+  const { extrairAssertaoDeBlocoDev } = require('./bdd-validacoes');
+  const assertaoLista = extrairAssertaoDeBlocoDev(corpoBloco);
+  if (assertaoLista) {
+    const ev = entaoVerificavel(assertaoLista);
+    if (ev && !entaoEhVago(ev)) return `  Então ${ev}`;
+  }
   return null;
+}
+
+function quandoParaBlocoDev(bloco, ctx) {
+  const q = quandoSubstituto(ctx);
+  if (q && !passoEhVago(q)) return q;
+
+  const blob = [bloco?.title, ctx?.titulo, ctx?.descricao]
+    .map((s) => limparTexto(s))
+    .filter(Boolean)
+    .join(' ');
+  if (/viewer|dicom/i.test(blob)) {
+    return passoGherkin('Quando', 'o usuário acessa o Dicom Viewer Web');
+  }
+
+  const passos = passosAPartirDoTitulo(ctx?.titulo || bloco?.title || '');
+  const qTitulo = passos.find((l) => /^\s*Quando/i.test(l));
+  if (qTitulo && !passoEhVago(qTitulo)) return qTitulo;
+
+  return passoGherkin('Quando', 'o usuário acessa a funcionalidade descrita no cenário Dev');
 }
 
 function quandoSubstituto(ctx) {
@@ -235,6 +262,7 @@ module.exports = {
   entaoEhVago,
   passoEhVago,
   entaoParaBlocoDev,
+  quandoParaBlocoDev,
   extrairEntaoDoTexto,
   quandoSubstituto,
   entaoSubstituto,

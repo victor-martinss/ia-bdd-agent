@@ -90,6 +90,64 @@ function buildLinkFilters(flat, sourceId) {
   return filters;
 }
 
+/** Campos UF que costumam guardar URL do card pai (SPA Dev/Feature). */
+const PARENT_URL_UF_KEYS = [
+  'ufCrm100_1765292212972',
+  'ufCrm94_1765292212972',
+];
+
+/**
+ * Cards QA (ex.: SPA 1294) cujo campo URL aponta para o card de origem (ex.: 1272/994).
+ * @param {number} sourceEtId
+ * @param {string|number} sourceItemId
+ */
+async function listQaCrmByParentUrlRef(sourceEtId, sourceItemId) {
+  if (process.env.BITRIX_LINKED_QA_SEARCH_BY_PARENT_URL === '0') return [];
+
+  const srcEt = Number.parseInt(String(sourceEtId), 10);
+  const srcId = Number.parseInt(String(sourceItemId), 10);
+  if (!Number.isFinite(srcEt) || !Number.isFinite(srcId)) return [];
+
+  const needle = `details/${srcId}`;
+  const qaEntityIds = (process.env.BITRIX_ENTITY_TYPE_IDS || '1294,1276')
+    .split(/[,;\s]+/)
+    .map((s) => Number.parseInt(s.trim(), 10))
+    .filter((n) => Number.isFinite(n) && n > 0 && n !== srcEt);
+
+  const found = new Map();
+  const searchWithoutStageFilter =
+    process.env.BITRIX_LINKED_QA_SEARCH_WITHOUT_STAGE_FILTER !== '0';
+
+  for (const etId of qaEntityIds) {
+    const qaStageIds = await resolveQaStageIds(etId);
+    let stageFilter = {};
+    if (!searchWithoutStageFilter && qaStageIds.length) {
+      const stageFilterRaw = buildStageFilter(qaStageIds);
+      if (stageFilterRaw.stageId) stageFilter = { stageId: stageFilterRaw.stageId };
+      else if (stageFilterRaw['@stageId']) stageFilter = { '@stageId': stageFilterRaw['@stageId'] };
+    }
+
+    for (const ufKey of PARENT_URL_UF_KEYS) {
+      const filter = { ...stageFilter, [`%${ufKey}`]: `%${needle}%` };
+      const items = await listCrmItemsByFilter(etId, filter);
+      for (const it of items) {
+        const id = Number(it.id ?? it.ID);
+        if (!Number.isFinite(id) || id === srcId) continue;
+        const stageId = String(it.stageId || it.STAGE_ID || '');
+        if (stageId && (await isDevStageId(stageId, etId))) continue;
+        found.set(`${etId}:${id}`, {
+          id,
+          entityTypeId: etId,
+          stageId,
+          title: it.title || it.TITLE,
+        });
+      }
+    }
+  }
+
+  return [...found.values()];
+}
+
 async function listCrmItemsByFilter(entityTypeId, filter) {
   if (!BASE_URL) return [];
   const url = `${BASE_URL}/crm.item.list`;
@@ -161,6 +219,21 @@ async function listLinkedQaCrmItemIds(sourceItemId, detail = null) {
         });
       }
     }
+  }
+
+  const srcEtId =
+    Number.parseInt(
+      String(flat._entityTypeId || flat.entityTypeId || ''),
+      10
+    ) || entityTypeIds[0];
+
+  try {
+    const byUrl = await listQaCrmByParentUrlRef(srcEtId, sourceItemId);
+    for (const row of byUrl) {
+      found.set(`${row.entityTypeId}:${row.id}`, row);
+    }
+  } catch {
+    /* ignore */
   }
 
   return [...found.values()];

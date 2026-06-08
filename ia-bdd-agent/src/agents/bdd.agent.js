@@ -461,8 +461,7 @@ async function generateBDD(title, item) {
   if (
     blocosDev.length > 0 &&
     process.env.BDD_PREFER_STRUCTURED !== '0' &&
-    !forceLlm &&
-    !assertiveRefine
+    !forceLlm
   ) {
     return feature;
   }

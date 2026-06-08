@@ -27,7 +27,12 @@ function fraseEhIncompleta(texto) {
   if (!t || t.length < 10) return true;
   if (/…|\.\.\./.test(bruto)) return true;
   if (TERMINACOES_INCOMPLETAS.test(t)) return true;
-  if (/[a-záéíóúãõ][A-ZÁÉÍÓÚÁÉÍÓÚ][a-záéíóú]/.test(t)) return true;
+  // Colagem tipo "salvaConfig" — ignora tokens PascalCase (MobileMed, iOS)
+  const semMarcasPascal = t.replace(
+    /\b[A-ZÁÉÍÓÚ][a-záéíóú]+[A-ZÁÉÍÓÚ][A-Za-záéíóúãõ]*\b/g,
+    ' '
+  );
+  if (/[a-záéíóúãõ][A-ZÁÉÍÓÚ][a-záéíóú]/.test(semMarcasPascal)) return true;
   if (/\b(Salvar|Configurar|Abrir|Acessar)[a-záéíóú]/.test(t)) return true;
   if (t.split(/\s+/).length > 22 && !/[.!?]$/.test(t)) return true;
   return false;
@@ -1449,6 +1454,12 @@ function parseDevChunk(chunk, tituloFallback = null) {
     const mMarc = first.match(/\[\s*cenário[^\]]*\]\s*:?\s*(.*)$/i);
     if (mMarc) {
       title = (mMarc[1] || first).trim() || tituloFallback;
+    } else {
+      const mNum = first.match(/^\d+\s*[-–—.)]+\s*(.+)$/);
+      if (mNum) {
+        title = mNum[1].trim();
+        lines.shift();
+      }
     }
   }
 
@@ -1467,6 +1478,13 @@ function extrairLinhasGherkinDoBloco(lines) {
   return gherkin;
 }
 
+function textoBlocoDev(bloco) {
+  const parts = [];
+  if (bloco?.body && limparTexto(bloco.body)) parts.push(limparTexto(bloco.body));
+  if (bloco?.title && limparTexto(bloco.title)) parts.push(limparTexto(bloco.title));
+  return parts.join('\n');
+}
+
 /**
  * Cenários QA a partir de um bloco Dev (divide se passar de maxE linhas "E").
  * @returns {string[][]}
@@ -1476,8 +1494,9 @@ function cenariosQaAPartirDoDev(bloco, ctx, nomeFuncionalidade) {
     ? normalizarTitulo(bloco.title)
     : `${nomeFuncionalidadeCurto(nomeFuncionalidade)} — validação`;
   const refDev = bloco.title || null;
+  const textoDev = textoBlocoDev(bloco);
 
-  const passosCorpo = extrairQuandoEntaoDoCorpo(bloco.body);
+  const passosCorpo = extrairQuandoEntaoDoCorpo(bloco.body || textoDev);
   if (passosCorpo.quando && (passosCorpo.entao || passosCorpo.entaoList?.length)) {
     const entoes =
       passosCorpo.entaoList?.length > 0
@@ -1494,9 +1513,9 @@ function cenariosQaAPartirDoDev(bloco, ctx, nomeFuncionalidade) {
     return dividirCenarioCompletoPorMaxE(titulo, corpo, { refDev });
   }
 
-  const { entaoParaBlocoDev } = require('./bdd-rigor');
+  const { entaoParaBlocoDev, quandoParaBlocoDev } = require('./bdd-rigor');
   let entao =
-    entaoParaBlocoDev(ctx, bloco.body) || entaoDoContexto(ctx, bloco.body);
+    entaoParaBlocoDev(ctx, textoDev) || entaoDoContexto(ctx, textoDev);
   if (!entao) return [];
 
   const gherkinDev = extrairLinhasGherkinDoBloco(bloco.lines);
@@ -1524,8 +1543,7 @@ function cenariosQaAPartirDoDev(bloco, ctx, nomeFuncionalidade) {
 
   const chunks = passosParaStepsGherkinComContinuacao(passosMerged);
   if (!chunks.length) {
-    const { quandoSubstituto } = require('./bdd-rigor');
-    const quando = passosCorpo.quando || quandoSubstituto(ctx);
+    const quando = passosCorpo.quando || quandoParaBlocoDev(bloco, ctx);
     if (!quando) return [];
     return dividirCenarioCompletoPorMaxE(
       titulo,

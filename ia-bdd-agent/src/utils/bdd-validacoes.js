@@ -95,6 +95,22 @@ function extrairValidacoesExatas(ctx) {
   return out;
 }
 
+function extrairAssertaoDeBlocoDev(texto) {
+  const t = limparTexto(String(texto || ''));
+  if (!t || t.length < 10) return '';
+  const m = t.match(/^\d+\s*[-–—.)]+\s*(.+)$/);
+  const corpo = (m ? m[1] : t).trim();
+  if (corpo.length < 10) return '';
+  if (
+    /\b(fica|deve|exibe|aparece|mostra|mantém|mantem|permanece|não|nao|devem|são|sao|é|e\s+o\s+|e\s+a\s+|com\s+espaçamento|com\s+espacamento)\b/i.test(
+      corpo
+    )
+  ) {
+    return corpo;
+  }
+  return '';
+}
+
 /**
  * Monta bloco de Então assertivo (com referência a evidência quando houver).
  */
@@ -106,7 +122,12 @@ function entaoAssertivoDoContexto(ctx, textoDevFallback = '') {
     if (ev && !entaoEhVago(ev)) return `  Então ${ev}`;
   }
 
-  if (corpoBloco) return null;
+  const assertaoLista = extrairAssertaoDeBlocoDev(corpoBloco);
+  if (assertaoLista) {
+    const ev = entaoVerificavel(assertaoLista);
+    // Assertões explícitas do Dev (lista numerada) não passam por fraseEhIncompleta — marcas como MobileMed geram falso positivo.
+    if (ev && !entaoEhVago(ev)) return `  Então ${ev}`;
+  }
 
   const validacoes = extrairValidacoesExatas(ctx);
   if (validacoes.length === 1 && !entaoEhVago(validacoes[0].entao)) {
@@ -148,7 +169,7 @@ function formatarValidacoesParaPrompt(ctx) {
 module.exports = {
   splitCriteriosResultado,
   splitAssercoesColadas,
-  splitAssercoesColadas,
+  extrairAssertaoDeBlocoDev,
   extrairValidacoesExatas,
   entaoAssertivoDoContexto,
   formatarValidacoesParaPrompt,
