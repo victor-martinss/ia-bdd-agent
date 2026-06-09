@@ -43,33 +43,39 @@ function entityTypeProbeList(currentEtId) {
  * @param {Record<string, unknown>} lflat
  * @param {object} acc
  */
-function mergeLinkedFields(acc, lflat) {
+function mergeLinkedFields(acc, lflat, options = {}) {
+  const { preferParent = false } = options;
   const lctx = extractTaskContext(lflat);
 
+  const usarParent = (local, remoto) => {
+    if (!isMeaningful(remoto)) return local;
+    if (preferParent || !limparTexto(local)) return remoto;
+    return local;
+  };
+
   if (isMeaningful(lctx.cenariosTesteDev)) {
-    acc.cenariosTesteDev = mergeTextoBlock(
-      acc.cenariosTesteDev,
-      lctx.cenariosTesteDev,
-      'Dev (card vinculado)'
-    );
+    acc.cenariosTesteDev = preferParent || !limparTexto(acc.cenariosTesteDev)
+      ? lctx.cenariosTesteDev
+      : mergeTextoBlock(acc.cenariosTesteDev, lctx.cenariosTesteDev, 'Dev (card vinculado)');
   }
-  if (!limparTexto(acc.descricao) && isMeaningful(lctx.descricao)) {
-    acc.descricao = lctx.descricao;
+  if (isMeaningful(lctx.descricao)) {
+    acc.descricao = usarParent(acc.descricao, lctx.descricao);
   }
-  if (!limparTexto(acc.passos) && isMeaningful(lctx.passos)) {
-    acc.passos = lctx.passos;
+  if (isMeaningful(lctx.passos)) {
+    acc.passos = usarParent(acc.passos, lctx.passos);
   }
-  if (!limparTexto(acc.resultadoEsperado) && isMeaningful(lctx.resultadoEsperado)) {
-    acc.resultadoEsperado = lctx.resultadoEsperado;
+  if (isMeaningful(lctx.resultadoEsperado)) {
+    acc.resultadoEsperado = usarParent(acc.resultadoEsperado, lctx.resultadoEsperado);
   }
-  if (!limparTexto(acc.resultadoObtido) && isMeaningful(lctx.resultadoObtido)) {
-    acc.resultadoObtido = lctx.resultadoObtido;
+  if (isMeaningful(lctx.resultadoObtido)) {
+    acc.resultadoObtido = usarParent(acc.resultadoObtido, lctx.resultadoObtido);
   }
-  if (!limparTexto(acc.observacoes) && isMeaningful(lctx.observacoes)) {
-    acc.observacoes = lctx.observacoes;
+  if (isMeaningful(lctx.observacoes) || isMeaningful(lctx.observacoesDev)) {
+    const obsPai = [lctx.observacoesDev, lctx.observacoes].filter(isMeaningful).join('\n');
+    acc.observacoes = usarParent(acc.observacoes, obsPai);
   }
-  if (!limparTexto(acc.comentariosTarefa) && isMeaningful(lctx.comentariosTarefa)) {
-    acc.comentariosTarefa = lctx.comentariosTarefa;
+  if (isMeaningful(lctx.comentariosTarefa)) {
+    acc.comentariosTarefa = usarParent(acc.comentariosTarefa, lctx.comentariosTarefa);
   }
 
   const legacy = pickCrmUfText(lflat, ['DescricaoDoOcorrido']);
@@ -138,6 +144,8 @@ async function enrichCtxFromLinkedCrm(ctx, rawItem) {
   };
   /** @type {{ rawItem: object, entityTypeId: number, itemId: number }[]} */
   const evidenceSources = [];
+  /** @type {{ entityTypeId: number, itemId: number } | null} */
+  let parentViaUrl = null;
 
   for (const alvo of fila) {
     const key = alvo.entityTypeId
@@ -186,12 +194,23 @@ async function enrichCtxFromLinkedCrm(ctx, rawItem) {
     if (visitados.has(resolvedKey) && resolvedKey !== key) continue;
     visitados.add(resolvedKey);
 
-    mergeLinkedFields(acc, lflat);
+    const isParentUrlRef = alvo.priority === 0;
+    if (isParentUrlRef) {
+      parentViaUrl = { entityTypeId: resolvedEt, itemId: resolvedId };
+    }
+
+    mergeLinkedFields(acc, lflat, { preferParent: isParentUrlRef });
     evidenceSources.push({
       rawItem: linked,
       entityTypeId: resolvedEt,
       itemId: resolvedId,
+      isParentUrlRef,
     });
+
+    // Card pai via URL: Dev do pai é suficiente para gerar cenários no QA atrelado
+    if (isParentUrlRef && limparTexto(acc.cenariosTesteDev)) {
+      break;
+    }
 
     if (
       limparTexto(acc.cenariosTesteDev) &&
@@ -207,7 +226,8 @@ async function enrichCtxFromLinkedCrm(ctx, rawItem) {
     acc.descricao !== (ctx.descricao || '') ||
     acc.passos !== (ctx.passos || '') ||
     acc.resultadoEsperado !== (ctx.resultadoEsperado || '') ||
-    acc.resultadoObtido !== (ctx.resultadoObtido || '');
+    acc.resultadoObtido !== (ctx.resultadoObtido || '') ||
+    acc.observacoes !== (ctx.observacoes || '');
 
   if (!enriched && !evidenceSources.length) return ctx;
 
@@ -216,6 +236,7 @@ async function enrichCtxFromLinkedCrm(ctx, rawItem) {
     ...acc,
     _fontesVinculo: enriched || evidenceSources.length ? 'card_vinculado' : ctx._fontesVinculo,
     _linkedCrmEvidenceSources: evidenceSources,
+    _parentCrmRef: parentViaUrl,
   };
 }
 

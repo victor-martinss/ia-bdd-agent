@@ -122,6 +122,8 @@ function extractTaskContext(raw) {
 
     observacoes: pickCrmUfText(item, ['NgfObservacoes']),
 
+    observacoesDev: pickCrmUfText(item, ['NgfObservacoesDev', 'ObservacoesDev']),
+
     observacoesHu: pickCrmUfText(item, ['ObservacoesParaGeracaoHu']),
 
     observacoesTriagem: pickCrmUfText(item, [

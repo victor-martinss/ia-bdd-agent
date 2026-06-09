@@ -483,7 +483,12 @@ function passoGherkin(tipo, texto) {
     if (/^(a|o|os|as)\s+/i.test(corpo) && !/^o\s+usu[aá]rio\s+/i.test(corpo)) {
       return `  Quando ${corpo}`;
     }
-    let q = /^o\s+usu[aá]rio\s+/i.test(corpo) ? corpo : `o usuário ${corpo}`;
+    let q = corpo;
+    if (/^usu[aá]rio\b/i.test(corpo)) {
+      q = corpo.charAt(0).toLowerCase() + corpo.slice(1);
+    } else if (!/^o\s+usu[aá]rio\s+/i.test(corpo)) {
+      q = `o usuário ${corpo}`;
+    }
     q = q
       .replace(/\bo usuário\s+envio\b/i, 'o usuário envia')
       .replace(/\bo usuário\s+gravo\b/i, 'o usuário grava')
@@ -1061,6 +1066,17 @@ function parseCenariosDevBlocos(texto) {
     .trim();
   if (!limparTexto(bruto)) return [];
 
+  // "Cenário 1) Descrição: … Resultado Esperado: …" (parêntese — comum no SPA Feature 1272)
+  if (/(?:cenário|cenario)\s*\d+\s*\)/i.test(bruto)) {
+    const porParen = bruto
+      .split(/(?=(?:cenário|cenario)\s*\d+\s*\))/i)
+      .map((c) => c.replace(/^\s*---+\s*/g, '').trim())
+      .filter((c) => limparTexto(c));
+    if (porParen.length >= 1) {
+      return porParen.map((chunk) => parseDevChunkDescricaoResultado(chunk));
+    }
+  }
+
   // "Cenário 1: … Cenário 2: …" no mesmo parágrafo (campo Dev costuma vir numa linha só)
   if (/(?:cenário|cenario)\s*\d+\s*:/i.test(bruto)) {
     const porNumInline = bruto
@@ -1407,8 +1423,107 @@ function extrairQuandoEntaoDoCorpo(body) {
     }
   }
 
+  if (!quando || !entao) {
+    const blob = normalizarGwtInline(body).replace(/\r?\n/g, ' ').trim();
+    const mDr = blob.match(
+      /descri[cç][ãa]o\s*:\s*(.+?)\s+resultado\s+esperado\s*:\s*(.+)$/is
+    );
+    if (mDr) {
+      const descricao = limparMarkdownCru(mDr[1]).trim();
+      const resultado = limparMarkdownCru(mDr[2]).trim();
+      if (!quando && descricao) {
+        quando = quandoAPartirDeDescricaoDev(descricao);
+      }
+      if (!entao && resultado) {
+        const { splitAssercoesColadas } = require('./bdd-validacoes');
+        const frasesThen = splitAssercoesColadas(resultado)
+          .map((f) => entaoVerificavel(f))
+          .filter(Boolean);
+        if (frasesThen.length) {
+          entao = `  Então ${frasesThen[0]}`;
+          if (frasesThen.length > 1) {
+            entaoList = frasesThen.map((f) => `  Então ${f}`);
+          }
+        }
+      }
+    }
+  }
+
   if (!entaoList.length && entao) entaoList = [entao];
   return { quando, entao, entaoList, eSteps };
+}
+
+/**
+ * Formato Dev: "Cenário 1) Descrição: … Resultado Esperado: …"
+ * @param {string} chunk
+ */
+function parseDevChunkDescricaoResultado(chunk) {
+  let bruto = String(chunk || '').trim();
+  const mHeader = bruto.match(/^(?:cenário|cenario)\s*(\d+)\s*\)\s*/i);
+  const num = mHeader ? mHeader[1] : null;
+  if (mHeader) bruto = bruto.slice(mHeader[0].length).trim();
+
+  const blob = bruto.replace(/\r?\n/g, ' ').trim();
+  const mInline = blob.match(
+    /descri[cç][ãa]o\s*:\s*(.+?)\s+resultado\s+esperado\s*:\s*(.+)$/is
+  );
+  if (mInline) {
+    const descricao = limparMarkdownCru(mInline[1]).trim();
+    const resultado = limparMarkdownCru(mInline[2]).trim();
+    const title =
+      tituloCenarioCurto(descricao, 88) || (num ? `Cenário ${num}` : 'Cenário Dev');
+    const body = `Descrição: ${descricao}\nResultado Esperado: ${resultado}`;
+    return { title, body, lines: body.split(/\r?\n/) };
+  }
+
+  let descricao = '';
+  let resultado = '';
+  for (const line of bruto.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)) {
+    const md = line.match(/^descri[cç][ãa]o\s*:\s*(.*)$/i);
+    if (md) {
+      descricao = limparMarkdownCru(md[1]).trim();
+      continue;
+    }
+    const mr = line.match(/^resultado\s+esperado\s*:\s*(.*)$/i);
+    if (mr) {
+      resultado = limparMarkdownCru(mr[1]).trim();
+      continue;
+    }
+    if (resultado) resultado = `${resultado} ${line}`;
+    else if (descricao) descricao = `${descricao} ${line}`;
+  }
+
+  if (descricao || resultado) {
+    const title =
+      tituloCenarioCurto(descricao, 88) || (num ? `Cenário ${num}` : 'Cenário Dev');
+    const body = [
+      descricao ? `Descrição: ${descricao}` : '',
+      resultado ? `Resultado Esperado: ${resultado}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+    return { title, body, lines: body.split(/\r?\n/) };
+  }
+
+  const corpoAssertivo = limparMarkdownCru(bruto).trim();
+  if (corpoAssertivo.length >= 10) {
+    const title = tituloCenarioCurto(corpoAssertivo, 88) || (num ? `Cenário ${num}` : 'Cenário Dev');
+    const body = `Resultado Esperado: ${corpoAssertivo}`;
+    return { title, body, lines: [body] };
+  }
+
+  return parseDevChunk(chunk, num ? `Cenário ${num}` : null);
+}
+
+/** Evita "Quando o usuário usuário …" quando a frase já começa com Usuário. */
+function quandoAPartirDeDescricaoDev(descricao) {
+  const prep = objetivarFrase(limparMarkdownCru(descricao), 120) || limparTexto(descricao);
+  if (!prep) return null;
+  if (/^usu[aá]rio\b/i.test(prep)) {
+    const frase = prep.charAt(0).toLowerCase() + prep.slice(1);
+    return `  Quando ${frase}`;
+  }
+  return passoGherkin('Quando', prep) || `  Quando o usuário ${prep}`;
 }
 
 /** Formato Dev: "Cenário 1 Ação: … Resultado - …" (uma linha ou bloco). */

@@ -482,10 +482,15 @@ function expandirLinhaComTracos(linha) {
 }
 
 function corrigirQuandoUsuarioArtigo(feature) {
-  return String(feature || '').replace(
-    /^(\s*Quando\s+)o usuário\s+(a|o|os|as)\s+/gim,
-    '$1$2 '
-  );
+  return String(feature || '')
+    .replace(
+      /^(\s*Quando\s+)o usuário\s+(a|o|os|as)\s+/gim,
+      '$1$2 '
+    )
+    .replace(
+      /^(\s*Quando\s+)o usuário\s+usu[aá]rio\s+/gim,
+      '$1usuário '
+    );
 }
 
 function repararAssercoesColadasNaFeature(feature) {

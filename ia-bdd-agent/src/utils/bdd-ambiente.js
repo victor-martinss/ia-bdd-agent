@@ -70,11 +70,54 @@ const REGRAS_AMBIENTE = [
 ];
 
 /**
+ * Módulo explícito no título do card QA (prevalece sobre menções no Dev, ex. "laudário").
+ * @param {string} titulo
+ * @returns {AmbienteDetectado | null}
+ */
+function detectAmbienteTituloPrioritario(titulo) {
+  const t = String(titulo || '');
+  if (!t.trim()) return null;
+
+  if (/\bportal\s*vet\b/i.test(t)) {
+    return { id: 'portal_vet', label: 'Portal Vet', confianca: 'alta' };
+  }
+  if (/\bportal\s*(de\s*)?entregas\b/i.test(t)) {
+    return { id: 'portal_entregas', label: 'Portal de Entregas', confianca: 'alta' };
+  }
+  if (
+    /\bdicom\b/i.test(t) &&
+    /\b(viewer|visualizador|web|espelhamento)\b/i.test(t)
+  ) {
+    return { id: 'dicom_viewer', label: 'DICOM Viewer Web', confianca: 'alta' };
+  }
+  if (
+    /\bportal\s*mobilemed\b/i.test(t) ||
+    (/\bdesenvolvimento\s*web\b/i.test(t) && /\bportal\b/i.test(t))
+  ) {
+    return { id: 'portal_web', label: 'Portal Web (Mobilemed)', confianca: 'alta' };
+  }
+  if (/\bworklist\b/i.test(t) && !/\bportal\b/i.test(t)) {
+    return { id: 'worklist', label: 'Worklist', confianca: 'alta' };
+  }
+  if (
+    /\b(portable|desktop)\b/i.test(t) &&
+    !/\bdicom\s+viewer\b/i.test(t) &&
+    !/\bportal\b/i.test(t)
+  ) {
+    return { id: 'portable', label: 'Portable (Desktop)', confianca: 'alta' };
+  }
+  return null;
+}
+
+/**
  * @param {string} titulo
  * @param {string} cenariosDev
  * @returns {AmbienteDetectado}
  */
 function detectAmbiente(titulo, cenariosDev = '') {
+  const tituloPrioritario = detectAmbienteTituloPrioritario(titulo);
+  if (tituloPrioritario) return tituloPrioritario;
+
   const texto = `${titulo || ''}\n${cenariosDev || ''}`.trim();
   if (!texto) {
     return { id: 'indefinido', label: 'sistema', confianca: 'baixa' };
@@ -130,6 +173,7 @@ function onlyTitleAndDevSources() {
 
 module.exports = {
   detectAmbiente,
+  detectAmbienteTituloPrioritario,
   dadoAcessaAmbiente,
   onlyTitleAndDevSources,
   REGRAS_AMBIENTE,
