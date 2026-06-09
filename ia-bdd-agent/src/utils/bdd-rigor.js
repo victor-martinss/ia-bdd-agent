@@ -84,13 +84,18 @@ function entaoParaBlocoDev(ctx, corpoBloco) {
   const { extrairAssertaoDeBlocoDev } = require('./bdd-validacoes');
   const assertaoLista = extrairAssertaoDeBlocoDev(corpoBloco);
   if (assertaoLista) {
-    const ev = entaoVerificavel(assertaoLista);
+    const { entaoVerificavelDev } = require('./bdd-gherkin');
+    const ev = entaoVerificavelDev(assertaoLista) || entaoVerificavel(assertaoLista);
     if (ev && !entaoEhVago(ev)) return `  Então ${ev}`;
   }
   return null;
 }
 
 function quandoParaBlocoDev(bloco, ctx) {
+  const { quandoAPartirDeAssertivoDev } = require('./bdd-gherkin');
+  const qa = quandoAPartirDeAssertivoDev(bloco);
+  if (qa) return qa;
+
   const q = quandoSubstituto(ctx);
   if (q && !passoEhVago(q)) return q;
 

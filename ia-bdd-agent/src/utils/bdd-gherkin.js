@@ -15,6 +15,10 @@ const MAX_PASSO_PALAVRAS =
   Number.parseInt(process.env.BDD_MAX_STEP_WORDS || '18', 10) || 18;
 const MAX_ENTAO_CHARS =
   Number.parseInt(process.env.BDD_MAX_ENTAO_CHARS || '220', 10) || 220;
+const MAX_ENTAO_DEV_CHARS =
+  Number.parseInt(process.env.BDD_MAX_ENTAO_DEV_CHARS || '520', 10) || 520;
+const MAX_QUANDO_DEV_CHARS =
+  Number.parseInt(process.env.BDD_MAX_QUANDO_DEV_CHARS || '380', 10) || 380;
 
 /** Terminações que indicam frase cortada no meio (sem fechamento). */
 const TERMINACOES_INCOMPLETAS =
@@ -42,9 +46,22 @@ function fraseEhIncompleta(texto) {
 function passoEhColagemGherkin(texto) {
   const t = limparTexto(String(texto || '').replace(/^quando\s+|^e\s+/i, ''));
   if (!t) return true;
+  const ehDevLongo =
+    /^usu[aá]rio\b/i.test(t) ||
+    /^o\s+usu[aá]rio\s+/i.test(t) ||
+    /descri[cç][ãa]o\s*:|resultado\s+esperado\s*:/i.test(t) ||
+    /\b(modal|permiss[aã]o|compartilh|listagem|unidade|atribui[cç][ãa]o|permissões)\b/i.test(
+      t
+    );
+  const limiteChars = ehDevLongo
+    ? MAX_QUANDO_DEV_CHARS * 1.45
+    : MAX_PASSO_CHARS * 1.35;
+  if (t.length > limiteChars) {
+    const fraseCompleta = /[.!?]$/.test(t) && !/…|\.\.\./.test(t);
+    if (!fraseCompleta) return true;
+  }
   if (passoEhColagemDescricao(t)) return true;
   if (fraseEhIncompleta(t)) return true;
-  if (t.length > MAX_PASSO_CHARS * 1.35) return true;
   return false;
 }
 
@@ -423,7 +440,7 @@ function objetivarFrase(frase, maxLen = MAX_PASSO_CHARS) {
       .replace(/^selecionar\b/i, 'seleciona')
       .replace(/^aplicar\b/i, 'aplica')
       .replace(/^registrar\b/i, 'registra');
-    if (!/^o usuário\s/i.test(f)) {
+    if (!/^o usuário\s/i.test(f) && !/^usu[aá]rios?\b/i.test(f)) {
       f = `o usuário ${f.charAt(0).toLowerCase()}${f.slice(1)}`;
     }
   }
@@ -486,7 +503,7 @@ function passoGherkin(tipo, texto) {
     let q = corpo;
     if (/^usu[aá]rio\b/i.test(corpo)) {
       q = corpo.charAt(0).toLowerCase() + corpo.slice(1);
-    } else if (!/^o\s+usu[aá]rio\s+/i.test(corpo)) {
+    } else if (!/^o\s+usu[aá]rio\s+/i.test(corpo) && !/^usu[aá]rios?\b/i.test(corpo)) {
       q = `o usuário ${corpo}`;
     }
     q = q
@@ -687,7 +704,8 @@ function passosParaStepsGherkin(passos, opts = {}) {
 function separarTiposLinhas(linhas) {
   const dado = [];
   const acao = [];
-  let entao = null;
+  /** @type {string[]} */
+  const entoes = [];
   let mas = null;
   let viuQuando = false;
 
@@ -699,7 +717,7 @@ function separarTiposLinhas(linhas) {
       continue;
     }
     if (/^\s*Então/i.test(t)) {
-      entao = t.startsWith('  ') ? t : `  ${t.trim()}`;
+      entoes.push(t.startsWith('  ') ? t : `  ${t.trim()}`);
       continue;
     }
     if (/^\s*Mas/i.test(t)) {
@@ -721,7 +739,13 @@ function separarTiposLinhas(linhas) {
     else acao.push(t);
   }
 
-  return { dado, acao, entao, mas };
+  const entao = entoes[0] || null;
+  return { dado, acao, entao, entoes, mas };
+}
+
+function listaEntoesSeparados(separado) {
+  if (separado.entoes?.length) return separado.entoes;
+  return separado.entao ? [separado.entao] : [];
 }
 
 function dividirAcaoEmChunks(acaoLinhas, maxE) {
@@ -881,7 +905,8 @@ function dividirCenarioPorFasesAmbiente(tituloBase, linhasCorpo, opts = {}) {
  * Divide passos (Dado E + Quando/E) em cenários menores respeitando maxE.
  * @returns {string[][]}
  */
-function dividirCenarioPorTotalPassos(tituloBase, dado, acao, entao, mas, opts = {}) {
+function dividirCenarioPorTotalPassos(tituloBase, dado, acao, entoes, mas, opts = {}) {
+  const listaEntao = Array.isArray(entoes) ? entoes : entoes ? [entoes] : [];
   const maxE = maxEPorCenario();
   const maxSlots = 1 + maxE;
   const janela = maxAcoesBrutasPorCenario();
@@ -896,7 +921,7 @@ function dividirCenarioPorTotalPassos(tituloBase, dado, acao, entao, mas, opts =
       ...(dadoAmb ? [dadoAmb] : dado),
       '  Quando o usuário executa o fluxo descrito no chamado',
     ];
-    if (entao) corpo.push(entao);
+    corpo.push(...listaEntao);
     if (mas) corpo.push(mas);
     return [montarBlocoCenario(tituloBase, corpo, opts)];
   }
@@ -912,7 +937,7 @@ function dividirCenarioPorTotalPassos(tituloBase, dado, acao, entao, mas, opts =
 
   if (partes.length <= 1) {
     const corpo = [...(dadoAmb ? [dadoAmb] : dado), ...partes[0]];
-    if (entao) corpo.push(entao);
+    corpo.push(...listaEntao);
     if (mas) corpo.push(mas);
     return [montarBlocoCenario(tituloBase, corpo, opts)];
   }
@@ -927,7 +952,7 @@ function dividirCenarioPorTotalPassos(tituloBase, dado, acao, entao, mas, opts =
         : [dadoContinuacaoFluxo()];
     const corpo = [...prefixo, ...acaoPart];
     const ultimo = idx === partes.length - 1;
-    if (ultimo && entao) corpo.push(entao);
+    if (ultimo) corpo.push(...listaEntao);
     if (ultimo && mas) corpo.push(mas);
     return montarBlocoCenario(`${tituloBase}${suffix}`, corpo, {
       ...opts,
@@ -946,7 +971,9 @@ function dividirCenarioPorTotalPassos(tituloBase, dado, acao, entao, mas, opts =
 function dividirCenarioCompletoPorMaxE(tituloBase, linhasCorpo, opts = {}) {
   const maxE = maxEPorCenario();
   const maxTotal = maxTotalEPorCenario();
-  const { dado, acao, entao, mas } = separarTiposLinhas(linhasCorpo);
+  const separado = separarTiposLinhas(linhasCorpo);
+  const { dado, acao, entao, mas } = separado;
+  const listaEntao = listaEntoesSeparados(separado);
 
   const porFases = dividirCenarioPorFasesAmbiente(tituloBase, linhasCorpo, opts);
   if (porFases) return porFases;
@@ -960,13 +987,13 @@ function dividirCenarioCompletoPorMaxE(tituloBase, linhasCorpo, opts = {}) {
       ...dado,
       '  Quando o usuário executa o fluxo descrito no chamado',
     ];
-    if (entao) corpo.push(entao);
+    corpo.push(...listaEntao);
     if (mas) corpo.push(mas);
     return [montarBlocoCenario(tituloBase, corpo, opts)];
   }
 
   if (totalE > maxTotal || textosAcao.length > janela) {
-    return dividirCenarioPorTotalPassos(tituloBase, dado, acao, entao, mas, opts);
+    return dividirCenarioPorTotalPassos(tituloBase, dado, acao, listaEntao, mas, opts);
   }
 
   const maxSlots = 1 + maxE;
@@ -987,7 +1014,7 @@ function dividirCenarioCompletoPorMaxE(tituloBase, linhasCorpo, opts = {}) {
 
   if (partesAcao.length === 1 && totalE <= maxTotal) {
     const corpo = [...dado, ...partesAcao[0]];
-    if (entao) corpo.push(entao);
+    corpo.push(...listaEntao);
     if (mas) corpo.push(mas);
     return [montarBlocoCenario(tituloBase, corpo, opts)];
   }
@@ -998,7 +1025,7 @@ function dividirCenarioCompletoPorMaxE(tituloBase, linhasCorpo, opts = {}) {
     const prefixo = idx === 0 ? (dadoAmb ? [dadoAmb] : []) : [dadoContinuacaoFluxo()];
     const corpo = [...prefixo, ...acaoPart];
     const ultimo = idx === partesAcao.length - 1;
-    if (ultimo && entao) corpo.push(entao);
+    if (ultimo) corpo.push(...listaEntao);
     if (ultimo && mas) corpo.push(mas);
     return montarBlocoCenario(`${tituloBase}${suffix}`, corpo, {
       ...opts,
@@ -1359,9 +1386,13 @@ function extrairQuandoEntaoDoCorpo(body) {
     const me = l.match(/^ent[aã]o\s+(.+)$/i);
     if (me) {
       const norm = normalizarLinhaGherkin(`Então ${me[1]}`);
-      entao =
+      const line =
         norm ||
         (entaoVerificavel(me[1]) ? `  Então ${entaoVerificavel(me[1])}` : null);
+      if (line) {
+        entao = line;
+        entaoList.push(line);
+      }
       continue;
     }
 
@@ -1435,15 +1466,32 @@ function extrairQuandoEntaoDoCorpo(body) {
         quando = quandoAPartirDeDescricaoDev(descricao);
       }
       if (!entao && resultado) {
-        const { splitAssercoesColadas } = require('./bdd-validacoes');
-        const frasesThen = splitAssercoesColadas(resultado)
-          .map((f) => entaoVerificavel(f))
+        const { splitResultadoDevEmAssercoes, formatarEntaoDevResultado } = require('./bdd-validacoes');
+        const frasesThen = splitResultadoDevEmAssercoes(resultado)
+          .map((f) => formatarEntaoDevResultado(f))
           .filter(Boolean);
         if (frasesThen.length) {
           entao = `  Então ${frasesThen[0]}`;
           if (frasesThen.length > 1) {
             entaoList = frasesThen.map((f) => `  Então ${f}`);
           }
+        }
+      }
+    }
+  }
+
+  if (!entao) {
+    const blobSolo = normalizarGwtInline(body).replace(/\r?\n/g, ' ').trim();
+    const mSolo = blobSolo.match(/^resultado\s+esperado\s*:\s*(.+)$/is);
+    if (mSolo) {
+      const { splitResultadoDevEmAssercoes, formatarEntaoDevResultado } = require('./bdd-validacoes');
+      const frasesThen = splitResultadoDevEmAssercoes(mSolo[1])
+        .map((f) => formatarEntaoDevResultado(f))
+        .filter(Boolean);
+      if (frasesThen.length) {
+        entao = `  Então ${frasesThen[0]}`;
+        if (frasesThen.length > 1) {
+          entaoList = frasesThen.map((f) => `  Então ${f}`);
         }
       }
     }
@@ -1515,15 +1563,71 @@ function parseDevChunkDescricaoResultado(chunk) {
   return parseDevChunk(chunk, num ? `Cenário ${num}` : null);
 }
 
+/** Frase Dev completa (sem corte agressivo de 120 chars). */
+function objetivarFraseDev(frase) {
+  let f = removerRuidoColagem(removerRotulos(limparMarkdownCru(frase)));
+  if (!f) return '';
+  f = f.replace(/\s+/g, ' ').trim();
+  const limite = MAX_QUANDO_DEV_CHARS * 1.35;
+  if (f.length > limite) {
+    f = truncarSemCortar(f, limite, 48);
+  }
+  return f;
+}
+
+/** Então fiel ao Resultado Esperado Dev (limite maior, sem pegar só a 1ª frase). */
+function entaoVerificavelDev(texto) {
+  let t = limparMarkdownCru(stripTextoAdministrativo(String(texto || '')));
+  t = t.replace(/^resultado\s+esperado\s*:\s*/i, '').trim();
+  if (!t) return '';
+  if (t.length > MAX_ENTAO_DEV_CHARS) {
+    t = truncarSemCortar(t, MAX_ENTAO_DEV_CHARS, 40);
+  }
+  return t;
+}
+
+/** Cenários Dev só com regra assertiva (sem Descrição/ação explícita). */
+function quandoAPartirDeAssertivoDev(bloco) {
+  const texto = limparTexto(
+    `${bloco?.title || ''} ${String(bloco?.body || '').replace(/^resultado\s+esperado\s*:\s*/i, '')}`
+  );
+  const t = texto.toLowerCase();
+  if (/empresa original.*n[aã]o deve|n[aã]o deve.*empresa original/.test(t)) {
+    return '  Quando o usuário da empresa que recebeu o exame executa processos sobre o exame compartilhado';
+  }
+  if (/n[aã]o pode visualizar|n[aã]o faz parte/.test(t)) {
+    return '  Quando o usuário tenta acessar exames de empresas às quais não pertence';
+  }
+  if (/mesmas permiss[oõ]es|de cada perfil/.test(t)) {
+    return '  Quando o usuário de cada perfil da empresa receptora acessa o exame compartilhado';
+  }
+  if (
+    /^(o|a|os|as)\s+usu[aá]rios?\b/i.test(texto) ||
+    /^a empresa\b/i.test(texto) ||
+    /\bdeve\b|\bn[aã]o deve\b|\bn[aã]o pode\b/i.test(texto)
+  ) {
+    const regra = objetivarFraseDev(
+      bloco?.title || texto.replace(/^resultado\s+esperado\s*:\s*/i, '')
+    );
+    if (regra && regra.length >= 12) {
+      return '  Quando o usuário executa ações no Portal para validar a regra de negócio do cenário';
+    }
+  }
+  return null;
+}
+
 /** Evita "Quando o usuário usuário …" quando a frase já começa com Usuário. */
 function quandoAPartirDeDescricaoDev(descricao) {
-  const prep = objetivarFrase(limparMarkdownCru(descricao), 120) || limparTexto(descricao);
+  const prep = objetivarFraseDev(descricao) || limparTexto(descricao);
   if (!prep) return null;
   if (/^usu[aá]rio\b/i.test(prep)) {
     const frase = prep.charAt(0).toLowerCase() + prep.slice(1);
     return `  Quando ${frase}`;
   }
-  return passoGherkin('Quando', prep) || `  Quando o usuário ${prep}`;
+  if (/^o\s+usu[aá]rio\s+/i.test(prep)) {
+    return `  Quando ${prep}`;
+  }
+  return `  Quando o usuário ${prep.charAt(0).toLowerCase() + prep.slice(1)}`;
 }
 
 /** Formato Dev: "Cenário 1 Ação: … Resultado - …" (uma linha ou bloco). */
@@ -1612,7 +1716,20 @@ function cenariosQaAPartirDoDev(bloco, ctx, nomeFuncionalidade) {
   const textoDev = textoBlocoDev(bloco);
 
   const passosCorpo = extrairQuandoEntaoDoCorpo(bloco.body || textoDev);
-  if (passosCorpo.quando && (passosCorpo.entao || passosCorpo.entaoList?.length)) {
+  const formatoDevEstruturado = /descri[cç][ãa]o\s*:|resultado\s+esperado\s*:/i.test(
+    bloco.body || ''
+  );
+
+  if (passosCorpo.entao || passosCorpo.entaoList?.length) {
+    const { quandoParaBlocoDev } = require('./bdd-rigor');
+    const soAssertivo =
+      /^resultado\s+esperado\s*:/im.test(bloco.body || '') &&
+      !/descri[cç][ãa]o\s*:/i.test(bloco.body || '');
+    const quando =
+      passosCorpo.quando ||
+      (soAssertivo ? quandoAPartirDeAssertivoDev(bloco) : null) ||
+      quandoParaBlocoDev(bloco, ctx);
+    if (!quando) return [];
     const entoes =
       passosCorpo.entaoList?.length > 0
         ? passosCorpo.entaoList
@@ -1622,7 +1739,7 @@ function cenariosQaAPartirDoDev(bloco, ctx, nomeFuncionalidade) {
     const corpo = [
       ...montarDadosIniciais(ctx),
       ...(passosCorpo.eSteps || []),
-      passosCorpo.quando,
+      quando,
       ...entoes,
     ];
     return dividirCenarioCompletoPorMaxE(titulo, corpo, { refDev });
@@ -1647,7 +1764,7 @@ function cenariosQaAPartirDoDev(bloco, ctx, nomeFuncionalidade) {
   }
 
   const passosMerged =
-    bloco.body && limparTexto(bloco.body)
+    !formatoDevEstruturado && bloco.body && limparTexto(bloco.body)
       ? mergePassosFontes(
           bloco.body,
           onlyTitleAndDevSources() ? '' : ctx.passos
@@ -1656,9 +1773,17 @@ function cenariosQaAPartirDoDev(bloco, ctx, nomeFuncionalidade) {
         ? ''
         : mergePassosFontes(ctx.passos, ctx.descricao);
 
-  const chunks = passosParaStepsGherkinComContinuacao(passosMerged);
+  const chunks = formatoDevEstruturado
+    ? []
+    : passosParaStepsGherkinComContinuacao(passosMerged);
   if (!chunks.length) {
-    const quando = passosCorpo.quando || quandoParaBlocoDev(bloco, ctx);
+    const soAssertivo =
+      /^resultado\s+esperado\s*:/im.test(bloco.body || '') &&
+      !/descri[cç][ãa]o\s*:/i.test(bloco.body || '');
+    const quando =
+      passosCorpo.quando ||
+      (soAssertivo ? quandoAPartirDeAssertivoDev(bloco) : null) ||
+      quandoParaBlocoDev(bloco, ctx);
     if (!quando) return [];
     return dividirCenarioCompletoPorMaxE(
       titulo,
@@ -2113,6 +2238,9 @@ module.exports = {
   linhaEhRotuloChamado,
   nomeFuncionalidadeCurto,
   entaoVerificavel,
+  entaoVerificavelDev,
+  objetivarFraseDev,
+  quandoAPartirDeAssertivoDev,
   fraseEhIncompleta,
   passoEhColagemGherkin,
   MAX_ENTAO_CHARS,

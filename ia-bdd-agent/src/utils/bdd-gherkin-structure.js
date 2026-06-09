@@ -293,7 +293,9 @@ function montarBlocoCenarioCompleto(b, ctx) {
 
   const quandoRuim = b.quando.some((ln) => {
     const corpo = ln.replace(/^\s*(quando|e)\s+/i, '').trim();
-    return passoEhColagemGherkin(corpo) || passoEhVago(ln);
+    if (passoEhVago(ln)) return true;
+    if (!passoEhColagemGherkin(corpo)) return false;
+    return fraseEhIncompleta(corpo);
   });
 
   if (quandoRuim || !b.quando.length) {
@@ -488,8 +490,12 @@ function corrigirQuandoUsuarioArtigo(feature) {
       '$1$2 '
     )
     .replace(
-      /^(\s*Quando\s+)o usuário\s+usu[aá]rio\s+/gim,
+      /^(\s*Quando\s+)o usuário\s+usu[aá]rio[\s,]+/gim,
       '$1usuário '
+    )
+    .replace(
+      /^(\s*Quando\s+)o usuário\s+(usu[aá]rios?)\b/gim,
+      '$1$2'
     );
 }
 

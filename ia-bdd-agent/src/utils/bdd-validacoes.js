@@ -19,6 +19,71 @@ function splitCriteriosResultado(texto) {
  * Separa asserções coladas com " - " (comum em Cenários Dev inline).
  * Ex.: "não devem aparecer abas - O título deve ser X - A coluna Y"
  */
+/**
+ * Divide Resultado Esperado Dev em asserções completas (bullets, setas, frases).
+ * @param {string} resultado
+ * @returns {string[]}
+ */
+function splitResultadoDevEmAssercoes(resultado) {
+  let t = limparTexto(stripTextoAdministrativo(String(resultado || '')))
+    .replace(/^resultado\s+esperado\s*:\s*/i, '')
+    .trim();
+  if (!t) return [];
+
+  let parts = t
+    .split(/\s+-\s+(?=(?:Caso|Usuário|Na\s|O\s|A\s|O\s+modal|O\s+botão|O\s+ícone))/i)
+    .map((p) => p.trim())
+    .filter((p) => p.length >= 12);
+  if (parts.length > 1) {
+    return expandirPartesResultadoDev(parts);
+  }
+
+  parts = t
+    .split(/\s+-\s+(?=Usuário)/i)
+    .map((p) => p.trim())
+    .filter((p) => p.length >= 12);
+  if (parts.length > 1) return expandirPartesResultadoDev(parts);
+
+  parts = t
+    .split(/(?<=[.!?])\s+(?=["“A-ZÁÉÍÓÚÉO])/u)
+    .map((p) => p.trim())
+    .filter((p) => p.length >= 12);
+  if (parts.length > 1) return expandirPartesResultadoDev(parts);
+
+  const coladas = splitAssercoesColadas(t);
+  return expandirPartesResultadoDev(coladas.length ? coladas : [t]);
+}
+
+/** Normaliza partes do Resultado Dev (setas => e frases completas). */
+function expandirPartesResultadoDev(partes) {
+  const out = [];
+  for (const raw of partes) {
+    const p = String(raw || '').trim();
+    if (!p) continue;
+    const mSeta = p.match(/^(.+?)\s*=>\s*(.+)$/s);
+    if (mSeta) {
+      const entao = mSeta[2].replace(/;\s*$/g, '').trim();
+      if (entao.length >= 10) out.push(entao);
+      continue;
+    }
+    if (p.length >= 10) out.push(p);
+  }
+  return out.filter((p, i, arr) => arr.indexOf(p) === i);
+}
+
+/** Então formatado a partir de trecho do Resultado Esperado Dev. */
+function formatarEntaoDevResultado(parte) {
+  const { entaoVerificavelDev } = require('./bdd-gherkin');
+  const p = String(parte || '')
+    .trim()
+    .replace(/^[-–—]\s+/, '');
+  const mSeta = p.match(/^(.+?)\s*=>\s*(.+)$/s);
+  if (mSeta) {
+    return entaoVerificavelDev(mSeta[2].replace(/;\s*$/g, ''));
+  }
+  return entaoVerificavelDev(p);
+}
+
 function splitAssercoesColadas(texto) {
   const t = String(texto || '').trim();
   if (!t || !/\s+-\s+/.test(t)) return t ? [t] : [];
@@ -168,6 +233,8 @@ function formatarValidacoesParaPrompt(ctx) {
 
 module.exports = {
   splitCriteriosResultado,
+  splitResultadoDevEmAssercoes,
+  formatarEntaoDevResultado,
   splitAssercoesColadas,
   extrairAssertaoDeBlocoDev,
   extrairValidacoesExatas,
