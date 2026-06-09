@@ -484,7 +484,8 @@ function passoGherkin(tipo, texto) {
     let eCorpo = corpo;
     if (
       !/^(o|a|os|as|sou|estou|existem|existe|gerencio|há)\s/i.test(eCorpo) &&
-      !/^o\s+usu[aá]rio\s+/i.test(eCorpo)
+      !/^o\s+usu[aá]rio\s+/i.test(eCorpo) &&
+      !/^a\s+tarefa\b/i.test(eCorpo)
     ) {
       eCorpo = `o usuário ${eCorpo}`;
     }
@@ -911,10 +912,7 @@ function dividirCenarioPorTotalPassos(tituloBase, dado, acao, entoes, mas, opts 
   const maxSlots = 1 + maxE;
   const janela = maxAcoesBrutasPorCenario();
   const dadoAmb = primeiraLinhaDado(dado);
-  const textos = [
-    ...extrairTextosPassosDeLinhas(dado),
-    ...extrairTextosPassosDeLinhas(acao),
-  ];
+  const textos = extrairTextosPassosDeLinhas(acao);
 
   if (!textos.length) {
     const corpo = [
@@ -936,7 +934,7 @@ function dividirCenarioPorTotalPassos(tituloBase, dado, acao, entoes, mas, opts 
   }
 
   if (partes.length <= 1) {
-    const corpo = [...(dadoAmb ? [dadoAmb] : dado), ...partes[0]];
+    const corpo = [...dado, ...partes[0]];
     corpo.push(...listaEntao);
     if (mas) corpo.push(mas);
     return [montarBlocoCenario(tituloBase, corpo, opts)];
@@ -946,9 +944,11 @@ function dividirCenarioPorTotalPassos(tituloBase, dado, acao, entoes, mas, opts 
     const suffix = idx > 0 ? ' — continuação' : '';
     const prefixo =
       idx === 0
-        ? dadoAmb
-          ? [dadoAmb]
-          : dado.filter((ln) => /^\s*Dado/i.test(ln))
+        ? dado.length
+          ? dado
+          : dadoAmb
+            ? [dadoAmb]
+            : []
         : [dadoContinuacaoFluxo()];
     const corpo = [...prefixo, ...acaoPart];
     const ultimo = idx === partes.length - 1;
@@ -981,6 +981,17 @@ function dividirCenarioCompletoPorMaxE(tituloBase, linhasCorpo, opts = {}) {
   const totalE = contarLinhasE(dado) + contarLinhasE(acao);
   const textosAcao = extrairTextosPassosDeLinhas(acao);
   const janela = maxAcoesBrutasPorCenario();
+  const acaoPreFormatada =
+    acao.length > 0 &&
+    acao.every((ln) => /^\s*(?:Quando|E)\s+/i.test(ln)) &&
+    acao.some((ln) => /^\s*Quando/i.test(ln));
+
+  if (acaoPreFormatada && listaEntao.length && textosAcao.length <= janela) {
+    const corpo = [...dado, ...acao];
+    corpo.push(...listaEntao);
+    if (mas) corpo.push(mas);
+    return [montarBlocoCenario(tituloBase, corpo, opts)];
+  }
 
   if (!textosAcao.length && totalE <= maxTotal) {
     const corpo = [
@@ -993,6 +1004,12 @@ function dividirCenarioCompletoPorMaxE(tituloBase, linhasCorpo, opts = {}) {
   }
 
   if (totalE > maxTotal || textosAcao.length > janela) {
+    if (textosAcao.length <= janela && acao.some((ln) => /^\s*Quando/i.test(ln))) {
+      const corpo = [...dado, ...acao];
+      corpo.push(...listaEntao);
+      if (mas) corpo.push(mas);
+      return [montarBlocoCenario(tituloBase, corpo, opts)];
+    }
     return dividirCenarioPorTotalPassos(tituloBase, dado, acao, listaEntao, mas, opts);
   }
 
@@ -1364,8 +1381,126 @@ function normalizarGwtInline(body) {
     .replace(/\*{0,2}\s*then\s*:\*{0,2}/gi, '\nThen: ');
 }
 
+function corpoTemFormatoGwtDev(body) {
+  return /(?:\*\*)?\s*(?:given|when|then)\s*:/i.test(String(body || ''));
+}
+
+/** Pré-condição Given → passo E (sem prefixar "o usuário" em "Existe…"). */
+function preparacaoGivenParaE(texto) {
+  const prep = objetivarFraseDev(texto) || limparTexto(texto);
+  if (!prep) return null;
+  if (/^(existem|existe|há|o|a|os|as|um|uma)\b/i.test(prep)) {
+    return prep.charAt(0).toLowerCase() + prep.slice(1);
+  }
+  if (/^o\s+usu[aá]rio\b/i.test(prep) || /^usu[aá]rio\b/i.test(prep)) {
+    return prep.charAt(0).toLowerCase() + prep.slice(1);
+  }
+  return `o usuário ${prep.charAt(0).toLowerCase() + prep.slice(1)}`;
+}
+
+/**
+ * Blocos multilinha **Given:** / **When:** / **Then:** (comum em cards DICOM).
+ * @returns {{ given: string[], when: string[], then: string[] }}
+ */
+function parseSecoesGwtDev(body) {
+  const lines = normalizarGwtInline(body)
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l && !/^---+$/.test(l));
+
+  /** @type {{ given: string[], when: string[], then: string[] }} */
+  const sections = { given: [], when: [], then: [] };
+  /** @type {'given'|'when'|'then'|null} */
+  let phase = null;
+
+  for (const l of lines) {
+    const mg = l.match(/^given\s*:\s*(.*)$/i);
+    if (mg) {
+      phase = 'given';
+      const rest = limparMarkdownCru(mg[1]).trim();
+      if (rest) sections.given.push(rest);
+      continue;
+    }
+    const mw = l.match(/^when\s*:\s*(.*)$/i);
+    if (mw) {
+      phase = 'when';
+      const rest = limparMarkdownCru(mw[1]).trim();
+      if (rest) sections.when.push(rest);
+      continue;
+    }
+    const mt = l.match(/^then\s*:\s*(.*)$/i);
+    if (mt) {
+      phase = 'then';
+      const rest = limparMarkdownCru(mt[1]).trim();
+      if (rest) sections.then.push(rest);
+      continue;
+    }
+    if (!phase) continue;
+    const clean = limparMarkdownCru(l).trim();
+    if (clean) sections[phase].push(clean);
+  }
+
+  return sections;
+}
+
+/** Monta Quando/E/Então a partir de seções Given/When/Then Dev. */
+function montarPassosDeSecoesGwt(gwt) {
+  const eSteps = [];
+  for (const g of gwt.given) {
+    const eText = preparacaoGivenParaE(g);
+    if (eText) eSteps.push(`    E ${eText}`);
+  }
+
+  let quando = null;
+  /** @type {string[]} */
+  const ePosQuando = [];
+  const whenParts = gwt.when
+    .map((w) => objetivarFraseDev(w) || limparTexto(w))
+    .filter(Boolean);
+  if (whenParts.length) {
+    quando = quandoAPartirDeDescricaoDev(whenParts[0]);
+    for (let i = 1; i < whenParts.length; i++) {
+      const prep = whenParts[i];
+      let e = null;
+      if (/^a tarefa\b/i.test(prep)) {
+        e = `    E ${prep.charAt(0).toLowerCase() + prep.slice(1)}`;
+      } else {
+        e = passoGherkin('E', prep);
+      }
+      if (e) ePosQuando.push(e);
+    }
+  }
+
+  const { formatarEntaoDevResultado } = require('./bdd-validacoes');
+  const entaoList = gwt.then
+    .map((t) => formatarEntaoDevResultado(t))
+    .filter(Boolean)
+    .map((ev) => `  Então ${ev}`);
+
+  return {
+    quando,
+    entao: entaoList[0] || null,
+    entaoList,
+    eSteps,
+    ePosQuando,
+  };
+}
+
 /** Quando/Então já escritos no corpo do bloco Dev (Gherkin ou Given/When/Then). */
 function extrairQuandoEntaoDoCorpo(body) {
+  if (corpoTemFormatoGwtDev(body)) {
+    const gwt = parseSecoesGwtDev(body);
+    if (gwt.when.length || gwt.then.length) {
+      const montado = montarPassosDeSecoesGwt(gwt);
+      if (montado.entaoList?.length || montado.entao) {
+        if (!montado.entaoList?.length && montado.entao) {
+          montado.entaoList = [montado.entao];
+        }
+        return montado;
+      }
+    }
+  }
+
   const lines = normalizarGwtInline(body)
     .split(/\r?\n/)
     .map((l) => l.trim())
@@ -1498,7 +1633,7 @@ function extrairQuandoEntaoDoCorpo(body) {
   }
 
   if (!entaoList.length && entao) entaoList = [entao];
-  return { quando, entao, entaoList, eSteps };
+  return { quando, entao, entaoList, eSteps, ePosQuando: [] };
 }
 
 /**
@@ -1625,7 +1760,7 @@ function quandoAPartirDeDescricaoDev(descricao) {
     return `  Quando ${frase}`;
   }
   if (/^o\s+usu[aá]rio\s+/i.test(prep)) {
-    return `  Quando ${prep}`;
+    return `  Quando ${prep.charAt(0).toLowerCase() + prep.slice(1)}`;
   }
   return `  Quando o usuário ${prep.charAt(0).toLowerCase() + prep.slice(1)}`;
 }
@@ -1716,9 +1851,10 @@ function cenariosQaAPartirDoDev(bloco, ctx, nomeFuncionalidade) {
   const textoDev = textoBlocoDev(bloco);
 
   const passosCorpo = extrairQuandoEntaoDoCorpo(bloco.body || textoDev);
-  const formatoDevEstruturado = /descri[cç][ãa]o\s*:|resultado\s+esperado\s*:/i.test(
-    bloco.body || ''
-  );
+  const formatoGwtDev = corpoTemFormatoGwtDev(bloco.body || '');
+  const formatoDevEstruturado =
+    formatoGwtDev ||
+    /descri[cç][ãa]o\s*:|resultado\s+esperado\s*:/i.test(bloco.body || '');
 
   if (passosCorpo.entao || passosCorpo.entaoList?.length) {
     const { quandoParaBlocoDev } = require('./bdd-rigor');
@@ -1740,6 +1876,7 @@ function cenariosQaAPartirDoDev(bloco, ctx, nomeFuncionalidade) {
       ...montarDadosIniciais(ctx),
       ...(passosCorpo.eSteps || []),
       quando,
+      ...(passosCorpo.ePosQuando || []),
       ...entoes,
     ];
     return dividirCenarioCompletoPorMaxE(titulo, corpo, { refDev });
@@ -2241,6 +2378,9 @@ module.exports = {
   entaoVerificavelDev,
   objetivarFraseDev,
   quandoAPartirDeAssertivoDev,
+  corpoTemFormatoGwtDev,
+  parseSecoesGwtDev,
+  montarPassosDeSecoesGwt,
   fraseEhIncompleta,
   passoEhColagemGherkin,
   MAX_ENTAO_CHARS,
