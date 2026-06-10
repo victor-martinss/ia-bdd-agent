@@ -264,15 +264,18 @@ function gerarCenariosCoberturaExtra(ctx, blocosDev, nomeFuncionalidade) {
 
   if (!devJaCobre(blocosDev, [/permiss[aã]o|n[aã]o\s+autorizado|acesso\s+negado/i])) {
     if (/\b(perfil|permiss[aã]o|usu[aá]rio\s+sem)\b/i.test(t)) {
-      candidatos.push({
-        score: pontuarCoberturaExtra('Cobertura — usuário sem permissão', ctx, t),
-        linhas: montarCenarioExtra(
-          'Cobertura — usuário sem permissão',
-          ctx,
-          'acessar o módulo com usuário de perfil restrito\ntentar executar a ação do chamado',
-          '  Então o acesso é bloqueado ou a ação não é permitida conforme regra de perfil'
-        ),
-      });
+      const linhasPerm = montarCenarioExtra(
+        'Cobertura — usuário sem permissão',
+        ctx,
+        'acessar o módulo com usuário de perfil restrito\ntentar executar a ação do chamado',
+        '  Então o acesso é bloqueado ou a ação não é permitida conforme regra de perfil'
+      );
+      if (linhasPerm) {
+        candidatos.push({
+          score: pontuarCoberturaExtra('Cobertura — usuário sem permissão', ctx, t),
+          linhas: linhasPerm,
+        });
+      }
     }
   }
 
@@ -281,15 +284,18 @@ function gerarCenariosCoberturaExtra(ctx, blocosDev, nomeFuncionalidade) {
     /\b(filtro|pesquisa|sem\s+registro|nenhum\s+resultado)\b/i.test(t) &&
     !blobDev.includes('lista vazia')
   ) {
-    candidatos.push({
-      score: pontuarCoberturaExtra('Cobertura — lista sem registros', ctx, t),
-      linhas: montarCenarioExtra(
-        'Cobertura — lista sem registros',
-        ctx,
-        'aplicar filtro que não retorna resultados\nvisualizar a área de listagem',
-        '  Então é exibido estado vazio ou mensagem informativa sem erro de sistema'
-      ),
-    });
+    const linhasLista = montarCenarioExtra(
+      'Cobertura — lista sem registros',
+      ctx,
+      'aplicar filtro que não retorna resultados\nvisualizar a área de listagem',
+      '  Então é exibido estado vazio ou mensagem informativa sem erro de sistema'
+    );
+    if (linhasLista) {
+      candidatos.push({
+        score: pontuarCoberturaExtra('Cobertura — lista sem registros', ctx, t),
+        linhas: linhasLista,
+      });
+    }
   }
 
   const vistos = new Set();
@@ -320,6 +326,7 @@ function gerarCenariosCoberturaExtra(ctx, blocosDev, nomeFuncionalidade) {
   }
 
   const ranqueados = candidatos
+    .filter((c) => Array.isArray(c.linhas) && c.linhas.length > 0)
     .map((c) => ({
       ...c,
       score: c.score ?? pontuarCoberturaExtra((c.linhas[0] || '').replace(/^Cenário:\s*/i, ''), ctx, t),
@@ -330,6 +337,7 @@ function gerarCenariosCoberturaExtra(ctx, blocosDev, nomeFuncionalidade) {
   const unicos = [];
   for (const c of ranqueados) {
     const linhas = c.linhas;
+    if (!Array.isArray(linhas) || !linhas.length) continue;
     const titulo = (linhas[0] || '').replace(/^Cenário:\s*/i, '').trim();
     if (vistos.has(titulo)) continue;
 

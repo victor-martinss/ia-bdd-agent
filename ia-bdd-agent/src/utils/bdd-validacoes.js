@@ -203,7 +203,9 @@ function extrairAssertaoDeBlocoDev(texto) {
   const mRes = t.match(/resultado\s+esperado\s*:\s*(.+)$/is);
   if (mRes && mRes[1].trim().length >= 12) return mRes[1].trim();
   const mDevera = t.match(/dever[aá]\s+(.+)$/is);
-  if (mDevera && mDevera[1].trim().length >= 12) return mDevera[1].trim();
+  if (mDevera && mDevera[1].trim().length >= 12) {
+    return `deve ${mDevera[1].trim()}`;
+  }
   const m = t.match(/^\d+\s*[-–—.)]+\s*(.+)$/);
   const corpo = (m ? m[1] : t).trim();
   if (corpo.length < 10) return '';

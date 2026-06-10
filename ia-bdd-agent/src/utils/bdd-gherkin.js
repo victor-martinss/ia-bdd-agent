@@ -2198,13 +2198,42 @@ function textoBlocoDev(bloco) {
   return parts.join('\n');
 }
 
+/** Lista numerada Dev: "Realizar X, Após a geração, alterar Y, realizar novamente Z, deverá …". */
+function extrairPassosListaDevDoTitulo(titulo) {
+  const t = normalizarTitulo(String(titulo || ''));
+  const m = t.match(
+    /^realizar\s+(?:a|o)\s+(.+?),\s*ap[oó]s\s+a\s+gera[cç][aã]o,\s*alterar\s+(.+?),\s*realizar\s+novamente\s+(.+?),\s*dever[aá]/i
+  );
+  if (!m) return null;
+  const quando = passoGherkin('Quando', `o usuário realiza ${m[1].trim()}`);
+  const ePosQuando = [
+    passoGherkin('E', `altera ${m[2].trim()}`),
+    passoGherkin('E', `realiza novamente ${m[3].trim()}`),
+  ].filter(Boolean);
+  if (!quando) return null;
+  return { quando, ePosQuando };
+}
+
+function tituloCenarioDevLista(titulo) {
+  const t = normalizarTitulo(String(titulo || ''));
+  const m = t.match(/^realizar\s+(?:a|o)\s+(.+?),\s*ap[oó]s/i);
+  if (m) {
+    const acao = m[1].replace(/\s+com\s+configura[cç][aã]o.+$/i, '').trim();
+    return tituloCenarioCurto(`${acao} — respostas diferentes após alterar configuração`);
+  }
+  return tituloCenarioCurto(t);
+}
+
 /**
  * Cenários QA a partir de um bloco Dev (divide se passar de maxE linhas "E").
  * @returns {string[][]}
  */
 function cenariosQaAPartirDoDev(bloco, ctx, nomeFuncionalidade) {
+  const passosListaDev = extrairPassosListaDevDoTitulo(bloco.title || '');
   const titulo = bloco.title
-    ? normalizarTitulo(bloco.title)
+    ? passosListaDev
+      ? tituloCenarioDevLista(bloco.title)
+      : normalizarTitulo(bloco.title)
     : `${nomeFuncionalidadeCurto(nomeFuncionalidade)} — validação`;
   const refDev = bloco.title || null;
   const textoDev = textoBlocoDev(bloco);
@@ -2287,13 +2316,18 @@ function cenariosQaAPartirDoDev(bloco, ctx, nomeFuncionalidade) {
       /^resultado\s+esperado\s*:/im.test(bloco.body || '') &&
       !/descri[cç][ãa]o\s*:/i.test(bloco.body || '');
     const quando =
+      passosListaDev?.quando ||
       passosCorpo.quando ||
       (soAssertivo ? quandoAPartirDeAssertivoDev(bloco) : null) ||
       quandoParaBlocoDev(bloco, ctx);
     if (!quando) return [];
+    const ePos =
+      passosListaDev?.ePosQuando?.length > 0
+        ? passosListaDev.ePosQuando
+        : passosCorpo.ePosQuando || [];
     return dividirCenarioCompletoPorMaxE(
       titulo,
-      [...montarDadosIniciais(ctx), quando, entao],
+      [...montarDadosIniciais(ctx), quando, ...ePos, entao],
       { refDev }
     );
   }
@@ -2317,7 +2351,7 @@ function cenarioQaAPartirDoDev(bloco, ctx, nomeFuncionalidade) {
 /** Extrai Então verificável do título do cenário Dev ("… deve …"). */
 function entaoAPartirDoTituloDev(titulo) {
   const t = normalizarTitulo(String(titulo || ''));
-  const m = t.match(/\bdeve\s+(.+)$/i);
+  const m = t.match(/\bdever[aá]\s+(.+)$/i);
   if (!m) return null;
   const ev =
     entaoVerificavelDev(`deve ${m[1]}`) ||
@@ -2503,11 +2537,14 @@ function fluxoPrincipalDoTitulo(titulo) {
   if (!t) return '';
   const partes = t.split(/\s*[-–—]\s*/).map((p) => p.trim()).filter(Boolean);
   const skip =
-    /^(sustenta[çc][aã]o|desenvolvimento(\s+web|\s+desktop)?|portal(\s+mobilemed)?|mobile(\s+i)?|squad|feature|improvement|fix|bug|\s*x\s*)$/i;
+    /^(sustenta[çc][aã]o|desenvolvimento(\s+web|\s+desktop)?|portal(\s+mobilemed)?|mobile(\s+i)?|squad|feature|improve(?:ment)?|fix|bug|\s*x\s*)$/i;
   while (partes.length > 1 && skip.test(partes[0])) partes.shift();
-  if (partes.length > 1 && /^portal\s+mobilemed$/i.test(partes[0])) partes.shift();
+  if (partes.length > 1 && /^portal\s+mobilemed(?:\s+improve)?$/i.test(partes[0])) partes.shift();
   let fluxo = partes.join(' — ') || t;
-  fluxo = fluxo.replace(/^portal\s+mobilemed\s+/i, '').trim();
+  fluxo = fluxo
+    .replace(/^portal\s+mobilemed(?:\s+improve)?\s*[-–—]?\s*/i, '')
+    .replace(/^improve\s*[-–—]\s*/i, '')
+    .trim();
   return fluxo || t;
 }
 
@@ -2574,6 +2611,31 @@ function parseTituloParaCenario(titulo) {
       e: `o usuário acessa a funcionalidade citada no chamado`,
       quando: `o usuário ${acao.charAt(0).toLowerCase()}${acao.slice(1)}`,
       entao: `o fluxo é concluído sem o erro descrito no chamado`,
+    };
+  }
+
+  m = fluxo.match(
+    /invalidar\s+cache\s+(?:da\s+)?(?:resposta\s+)?(?:da\s+)?ia(?:\s*,\s*|\s+)quando\s+houver\s+mudan[çc]a\s+(?:no|em)\s+(.+)/i
+  );
+  if (m) {
+    const alvo = m[1].replace(/\s+para\s+(?:a\s+)?empresa\/?usu[aá]rio\s*$/i, '').trim();
+    return {
+      titulo: 'Invalidar cache da resposta da IA ao alterar painel',
+      e: `o usuário acessa o painel da IA${alvo ? ` (${alvo})` : ''}`,
+      quando: 'o usuário altera a configuração do painel da IA para a empresa ou usuário',
+      entao:
+        'a resposta da IA deve refletir a configuração atualizada sem reutilizar cache da configuração anterior',
+    };
+  }
+
+  m = fluxo.match(/quando\s+houver\s+mudan[çc]a\s+(?:no|em)\s+(.+)/i);
+  if (m) {
+    const alvo = m[1].trim();
+    return {
+      titulo: tituloCenarioCurto(fluxo),
+      e: `o usuário acessa ${alvo}`,
+      quando: `o usuário altera a configuração em ${alvo}`,
+      entao: 'o sistema deve refletir a alteração sem reutilizar dados em cache desatualizados',
     };
   }
 

@@ -110,7 +110,14 @@ function entaoParaBlocoDev(ctx, corpoBloco) {
 }
 
 function quandoParaBlocoDev(bloco, ctx) {
-  const { quandoAPartirDeAssertivoDev, quandoAPartirDeDescricaoDev } = require('./bdd-gherkin');
+  const {
+    quandoAPartirDeAssertivoDev,
+    quandoAPartirDeDescricaoDev,
+    extrairPassosListaDevDoTitulo,
+  } = require('./bdd-gherkin');
+  const listaDev = extrairPassosListaDevDoTitulo(bloco?.title || '');
+  if (listaDev?.quando && !passoEhVago(listaDev.quando)) return listaDev.quando;
+
   const qa = quandoAPartirDeAssertivoDev(bloco);
   if (qa) return qa;
 
@@ -133,7 +140,7 @@ function quandoParaBlocoDev(bloco, ctx) {
     return passoGherkin('Quando', 'o usuário acessa o Dicom Viewer Web');
   }
 
-  const passos = passosAPartirDoTitulo(ctx?.titulo || bloco?.title || '');
+  const passos = passosAPartirDoTitulo(bloco?.title || ctx?.titulo || '');
   const qTitulo = passos.find((l) => /^\s*Quando/i.test(l));
   if (qTitulo && !passoEhVago(qTitulo)) return qTitulo;
 
