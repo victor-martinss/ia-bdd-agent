@@ -114,9 +114,20 @@ function quandoParaBlocoDev(bloco, ctx) {
     quandoAPartirDeAssertivoDev,
     quandoAPartirDeDescricaoDev,
     extrairPassosListaDevDoTitulo,
+    quandoAPartirDeTituloDev,
   } = require('./bdd-gherkin');
   const listaDev = extrairPassosListaDevDoTitulo(bloco?.title || '');
   if (listaDev?.quando && !passoEhVago(listaDev.quando)) return listaDev.quando;
+
+  const qwTituloDev = quandoAPartirDeTituloDev(bloco?.title || '');
+  if (qwTituloDev && !passoEhVago(qwTituloDev)) return qwTituloDev;
+
+  const blobDev = [bloco?.body, bloco?.title].filter(Boolean).join(' ');
+  const mAoSolicitar = blobDev.match(/\bao\s+(.+?),\s*deve(?:r[aá])?\s+/is);
+  if (mAoSolicitar) {
+    const qw = passoGherkin('Quando', `o usuário ${mAoSolicitar[1].trim()}`);
+    if (qw && !passoEhVago(qw)) return qw;
+  }
 
   const qa = quandoAPartirDeAssertivoDev(bloco);
   if (qa) return qa;

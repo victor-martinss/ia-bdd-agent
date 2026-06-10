@@ -42,7 +42,13 @@ function fraseEhIncompleta(texto) {
   );
   if (/[a-záéíóúãõ][A-ZÁÉÍÓÚ][a-záéíóú]/.test(semMarcasPascal)) return true;
   if (/\b(Salvar|Configurar|Abrir|Acessar)[a-záéíóú]/.test(t)) return true;
-  if (t.split(/\s+/).length > 22 && !/[.!?]$/.test(t)) return true;
+  if (
+    t.split(/\s+/).length > 22 &&
+    !/[.!?]$/.test(t) &&
+    !/\bdeve(?:r[aá])?\b/i.test(t)
+  ) {
+    return true;
+  }
   if (/\b(deve|dever[aá])\s+(validar|confirmar|salvar|exibir|criar|remover|processar)\s*$/i.test(t)) {
     return true;
   }
@@ -56,6 +62,9 @@ function fraseEhIncompleta(texto) {
     t.length < 80
   ) {
     return true;
+  }
+  if (/\bdeve(?:r[aá])?\b/i.test(t) && t.length >= 20 && t.length <= MAX_ENTAO_DEV_CHARS) {
+    return false;
   }
   return false;
 }
@@ -1272,6 +1281,17 @@ function parseCenariosDevBlocos(texto) {
     return porNumero.map((chunk, i) => parseDevChunk(chunk, `Passo ${i + 1}`));
   }
 
+  // Lista inline: "1 - Passo A 2 - Passo B" (sem quebra de linha — comum em Features)
+  if (/\d+\s*[-–—.)]+\s/.test(bruto) && !/(?:cenário|cenario)\s*\d/i.test(bruto)) {
+    const porNumInline = bruto
+      .split(/(?<!\d)(?<=\S)\s+(?=\d+\s*[-–—.)]+\s)/)
+      .map((c) => c.trim())
+      .filter((c) => limparTexto(c));
+    if (porNumInline.length > 1) {
+      return porNumInline.map((chunk, i) => parseDevChunk(chunk, `Passo ${i + 1}`));
+    }
+  }
+
   // Lista inline: "- Dado …, ao …, deverá … - Dado …" (comum em Features DICOM)
   if (/(?:^|\s)-\s*(?:Dado|Given)\b/i.test(bruto) || /^(?:Dado|Given)\b/i.test(bruto)) {
     const porDado = bruto
@@ -2003,6 +2023,10 @@ function entaoVerificavelDev(texto) {
         : bruto;
     }
   }
+  const hadDeve = /\bdeve(?:r[aá])?\b/i.test(String(texto || ''));
+  if (t && hadDeve && !/\bdeve(?:r[aá])?\b/i.test(t)) {
+    t = /^ser\s+/i.test(t) ? `deve ${t}` : `deve ${t}`;
+  }
   return t;
 }
 
@@ -2198,6 +2222,18 @@ function textoBlocoDev(bloco) {
   return parts.join('\n');
 }
 
+/** Imperativo no título Dev: "Realizar …", "Tentar …", "Validar …". */
+function quandoAPartirDeTituloDev(titulo) {
+  const t = normalizarTitulo(String(titulo || ''));
+  const m = t.match(
+    /^(realizar|tentar|selecionar|validar|acessar|abrir|enviar|registrar|visualizar|clicar|aplicar|informar|configurar|alterar)\s+(.+)$/i
+  );
+  if (!m) return null;
+  const verbo = m[1].toLowerCase();
+  const resto = m[2].trim();
+  return passoGherkin('Quando', `o usuário ${verbo} ${resto}`);
+}
+
 /** Lista numerada Dev: "Realizar X, Após a geração, alterar Y, realizar novamente Z, deverá …". */
 function extrairPassosListaDevDoTitulo(titulo) {
   const t = normalizarTitulo(String(titulo || ''));
@@ -2230,10 +2266,13 @@ function tituloCenarioDevLista(titulo) {
  */
 function cenariosQaAPartirDoDev(bloco, ctx, nomeFuncionalidade) {
   const passosListaDev = extrairPassosListaDevDoTitulo(bloco.title || '');
+  const tituloBruto = bloco.title ? normalizarTitulo(bloco.title) : '';
   const titulo = bloco.title
     ? passosListaDev
       ? tituloCenarioDevLista(bloco.title)
-      : normalizarTitulo(bloco.title)
+      : tituloBruto.length > 96
+        ? tituloCenarioCurto(tituloBruto)
+        : tituloBruto
     : `${nomeFuncionalidadeCurto(nomeFuncionalidade)} — validação`;
   const refDev = bloco.title || null;
   const textoDev = textoBlocoDev(bloco);
@@ -2607,10 +2646,10 @@ function parseTituloParaCenario(titulo) {
   if (m) {
     const acao = m[1].trim();
     return {
-      titulo: fluxo.slice(0, 90),
+      titulo: tituloCenarioCurto(fluxo),
       e: `o usuário acessa a funcionalidade citada no chamado`,
       quando: `o usuário ${acao.charAt(0).toLowerCase()}${acao.slice(1)}`,
-      entao: `o fluxo é concluído sem o erro descrito no chamado`,
+      entao: `o fluxo de ${acao} deve ser concluído sem erro de sistema`,
     };
   }
 
@@ -2826,6 +2865,7 @@ module.exports = {
   entaoVerificavelDev,
   objetivarFraseDev,
   quandoAPartirDeAssertivoDev,
+  quandoAPartirDeDescricaoDev,
   corpoTemFormatoGwtDev,
   parseSecoesGwtDev,
   montarPassosDeSecoesGwt,
@@ -2865,6 +2905,9 @@ module.exports = {
   ctxTemCamposEstruturados,
   passosAPartirDoTitulo,
   entaoAPartirDoTitulo,
+  quandoAPartirDeTituloDev,
+  extrairPassosListaDevDoTitulo,
+  tituloCenarioDevLista,
   resolverPassosReproducao,
   sanitizarFeatureBdd,
   aplicarLimiteEPorCenarioNaFeature,

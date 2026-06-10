@@ -15,6 +15,11 @@ const { isQaStageId, isDevStageId } = require('../services/crm-qa-stages');
 const { getEntityTypeId } = require('../services/bitrix.service');
 const { generateBDD } = require('../agents/bdd.agent');
 const { initAggregateFile, writeBddArtifacts } = require('../utils/bdd-output');
+const { evaluateBddPollEligibility } = require('../utils/bdd-poll-eligibility');
+const {
+  diagnoseBddSkipRootCause,
+  logBddSkipRootCause,
+} = require('../utils/bdd-skip-root-cause');
 
 /**
  * Busca detalhes, gera BDD e grava arquivos (mesmo fluxo do index.js).
@@ -53,6 +58,12 @@ async function runBitrixBddCycle(packageRoot, options = {}) {
   let processed = 0;
   const crm = { ok: 0, skipped: 0, failed: 0, linkedQa: 0, lastField: null };
   const linkedTasks = { updated: 0, failed: 0 };
+  let lastBdd = '';
+  let publicavel = false;
+  let linkedQaResult = null;
+  let eligibility = null;
+  let generationError = null;
+
   for (const task of tasks) {
     try {
       const itemEtId = task._entityTypeId;
@@ -91,7 +102,14 @@ async function runBitrixBddCycle(packageRoot, options = {}) {
         );
       }
 
-      const bdd = await generateBDD(task.title, detail);
+      let bdd;
+      try {
+        bdd = await generateBDD(task.title, detail);
+      } catch (genErr) {
+        generationError = genErr.message || String(genErr);
+        throw genErr;
+      }
+      lastBdd = bdd;
 
       if (process.env.DEBUG_BITRIX === '1') {
         console.log('DETAIL:', JSON.stringify(detail, null, 2));
@@ -125,26 +143,46 @@ async function runBitrixBddCycle(packageRoot, options = {}) {
       const stageId = detail && (detail.stageId || detail.STAGE_ID);
       const inQa = stageId ? await isQaStageId(String(stageId), etId) : true;
       const inDev = stageId ? await isDevStageId(String(stageId), etId) : false;
-      const publicavel = bddPodePublicarNoCrm(bdd);
+      publicavel = bddPodePublicarNoCrm(bdd);
       const veioFilaQa = Boolean(task._queueKey);
       const forcarGravacaoCrm =
-        veioFilaQa ||
         task._forceCrmPush === true ||
-        process.env.BITRIX_PUSH_BDD_IGNORE_STAGE === '1' ||
-        classification.action === 'generate' ||
-        classification.action === 'merge';
+        process.env.BITRIX_PUSH_BDD_IGNORE_STAGE === '1';
+
+      eligibility =
+        task._pollEligibility ||
+        (await evaluateBddPollEligibility(task.id, detail, {
+          skipStageCheck: !veioFilaQa || forcarGravacaoCrm,
+        }));
+
+      const podeGravarCrm =
+        publicavel &&
+        (forcarGravacaoCrm || (eligibility && eligibility.proceed !== false));
 
       if (!publicavel && !quiet) {
-        console.warn(
-          `[CRM] item ${task.id}: cenários não gravados — card sem contexto suficiente (descrição, Dev, evidências ou comentários).`
-        );
+        const diag = diagnoseBddSkipRootCause({
+          detail,
+          bdd,
+          classification,
+          publicavel: false,
+        });
+        console.warn(`[CRM] item ${task.id}: cenários não gravados — ${diag.reason}`);
+        if (diag.hints?.length) {
+          for (const h of diag.hints) {
+            console.warn(`      → ${h}`);
+          }
+        }
+      } else if (publicavel && !podeGravarCrm && !quiet) {
+        const diag = diagnoseBddSkipRootCause({ eligibility, classification, publicavel: true });
+        console.warn(`[CRM] item ${task.id}: cenários não gravados — ${diag.reason}`);
+        logBddSkipRootCause(task.id, diag);
       }
 
       const targets = await discoverBddLinkedTargets(task.id, detail);
       const gravarNoCardPrincipal = shouldPushBddToMainCard(targets);
 
       if (
-        publicavel &&
+        podeGravarCrm &&
         gravarNoCardPrincipal &&
         (inQa || forcarGravacaoCrm || process.env.BITRIX_PUSH_BDD_ON_DEV_CARD === '1')
       ) {
@@ -164,7 +202,7 @@ async function runBitrixBddCycle(packageRoot, options = {}) {
         } else if (crmResult.skipped) crm.skipped += 1;
         else crm.failed += 1;
       } else if (
-        publicavel &&
+        podeGravarCrm &&
         !gravarNoCardPrincipal &&
         targets.hasLinkedDestinations &&
         !quiet
@@ -175,7 +213,9 @@ async function runBitrixBddCycle(packageRoot, options = {}) {
         console.log(
           `      Atrelados: ${targets.childCrmIds.length} filho(s) CRM, ${targets.linkedQaCrmIds.length} card(s) QA, ${targets.linkedBitrixTaskIds.length} tarefa(s) Bitrix`
         );
-      } else if (!publicavel && (inQa || forcarGravacaoCrm)) {
+      } else if ((!publicavel || !podeGravarCrm) && (inQa || forcarGravacaoCrm)) {
+        crm.skipped += 1;
+      } else if (publicavel && !podeGravarCrm && !quiet) {
         crm.skipped += 1;
       } else if (publicavel && !inQa && !inDev && !forcarGravacaoCrm && !quiet) {
         console.warn(
@@ -205,13 +245,27 @@ async function runBitrixBddCycle(packageRoot, options = {}) {
         );
       }
 
-      const linkedPush = await pushBddToAllLinkedDestinations(
-        task.id,
-        bddAtrelados,
-        detail,
-        { quiet }
-      );
+      const linkedPush =
+        podeGravarCrm && publicavel
+          ? await pushBddToAllLinkedDestinations(task.id, bddAtrelados, detail, {
+              quiet,
+            })
+          : {
+              qa: {
+                skipped: true,
+                reason: !publicavel
+                  ? 'BDD sem cenários válidos'
+                  : eligibility?.reason || 'não elegível para gravar',
+                updated: 0,
+                skippedAlreadyFilled: 0,
+              },
+              child: { updated: 0, skipped: true },
+              tasks: { updated: 0, skipped: true },
+              updated: 0,
+              failed: 0,
+            };
       const qaLinkResult = linkedPush.qa;
+      linkedQaResult = qaLinkResult;
       const childCrmResult = linkedPush.child;
       const linkResult = linkedPush.tasks;
       if (qaLinkResult.updated) {
@@ -276,7 +330,17 @@ async function runBitrixBddCycle(packageRoot, options = {}) {
       }
       if (publicavel) processed += 1;
     } catch (err) {
+      generationError = err.message || String(err);
       console.error(`Erro na task ${task.id}:`, err.message);
+      if (!quiet) {
+        const diag = diagnoseBddSkipRootCause({
+          detail: task._prefetchedDetail,
+          error: generationError,
+          classification: task._classification,
+          eligibility: task._pollEligibility,
+        });
+        logBddSkipRootCause(task.id, diag);
+      }
     }
   }
 
@@ -302,6 +366,11 @@ async function runBitrixBddCycle(packageRoot, options = {}) {
     taskIds: tasks.map((t) => t.id),
     crm,
     linkedTasks,
+    lastBdd,
+    publicavel,
+    linkedQaResult,
+    eligibility,
+    generationError,
   };
 }
 

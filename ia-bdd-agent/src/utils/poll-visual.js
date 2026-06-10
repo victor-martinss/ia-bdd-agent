@@ -131,6 +131,28 @@ function printCrmNotUpdated(row, reason) {
   console.log('');
 }
 
+/**
+ * @param {string|number} itemId
+ * @param {{ code: string, reason: string, hints?: string[] }} diagnosis
+ * @param {{ isNewInQueue?: boolean }} [opts]
+ */
+function printRootCause(itemId, diagnosis, opts = {}) {
+  const tag = opts.isNewInQueue
+    ? paint(c.magenta + c.bold, '🆕 CAUSA RAIZ (novo na fila)')
+    : paint(c.red + c.bold, '⚠ CAUSA RAIZ');
+  console.log(
+    `${tag} ${paint(c.bold, `item ${itemId}`)} ` +
+      paint(c.dim, `[${diagnosis.code}]`) +
+      ` ${diagnosis.reason}`
+  );
+  if (diagnosis.hints?.length) {
+    for (const h of diagnosis.hints) {
+      console.log(paint(c.dim, `     → ${h}`));
+    }
+  }
+  console.log('');
+}
+
 function printScanProgress(index, total, id, title) {
   const ts = logTimestampBr();
   const titulo = (title || '').slice(0, 40);
@@ -199,6 +221,7 @@ module.exports = {
   printGeneratedSuccess,
   printGeneratedError,
   printCrmNotUpdated,
+  printRootCause,
   printScanProgress,
   printCycleSummary,
 };

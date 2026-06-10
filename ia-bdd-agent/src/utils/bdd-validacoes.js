@@ -206,6 +206,18 @@ function extrairAssertaoDeBlocoDev(texto) {
   if (mDevera && mDevera[1].trim().length >= 12) {
     return `deve ${mDevera[1].trim()}`;
   }
+  const mDeve = t.match(/\bdeve\s+((?:ser|retornar|exibir|apresentar|permitir|bloquear|ocorrer|salvar|processar|refletir|obter|validar|sincronizar|enviar|gerar|manter|receber|aplicar|invalidar).+)$/is);
+  if (mDeve && mDeve[1].trim().length >= 12) {
+    return `deve ${mDeve[1].trim()}`;
+  }
+  const mValidar = t.match(/^validar\s+que\s+(.+)$/i);
+  if (mValidar && mValidar[1].trim().length >= 12) {
+    const resto = mValidar[1].trim();
+    if (/^n[aã]o\s+/i.test(resto)) {
+      return `não deve ${resto.replace(/^n[aã]o\s+/i, '').replace(/^aparece\b/i, 'aparecer')}`;
+    }
+    return `deve ${resto}`;
+  }
   const m = t.match(/^\d+\s*[-–—.)]+\s*(.+)$/);
   const corpo = (m ? m[1] : t).trim();
   if (corpo.length < 10) return '';
@@ -251,7 +263,11 @@ function entaoAssertivoDoContexto(ctx, textoDevFallback = '') {
         .filter((ev) => ev && !entaoEhVago(ev) && !fraseEhIncompleta(ev));
       if (frases[0]) return `  Então ${frases[0]}`;
     }
-    return null;
+    const passoSemAssertao =
+      !/deve(?:r[aá])?\s+/i.test(corpoBloco) &&
+      !/^resultado\s+esperado\s*:/i.test(corpoBloco) &&
+      !/^(?:given|when|then)\s*:/i.test(corpoBloco);
+    if (!passoSemAssertao) return null;
   }
 
   const validacoes = extrairValidacoesExatas(ctx);

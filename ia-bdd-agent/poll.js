@@ -16,9 +16,12 @@ const {
   printGeneratedSuccess,
   printGeneratedError,
   printCrmNotUpdated,
+  printRootCause,
   printScanProgress,
   printCycleSummary,
 } = require('./src/utils/poll-visual');
+const { evaluateBddPollEligibility } = require('./src/utils/bdd-poll-eligibility');
+const { diagnoseBddSkipRootCause } = require('./src/utils/bdd-skip-root-cause');
 const { sleep } = require('./src/utils/bitrix-http-retry');
 const {
   loadPollState,
@@ -162,15 +165,40 @@ async function scanAndProcessQaQueue(tasks, forceSet, newInQueueSet, onProgress,
       filled.push(row);
       skippedQaHistory += 1;
       if (isNewInQueue) {
-        console.log(
-          `${logTimestampBr()} ⊘ Item ${id} — retorno após QA (histórico); não gera cenários. ${classification.reason || ''}`
-        );
+        const diagnosis = diagnoseBddSkipRootCause({ classification });
+        printRootCause(id, diagnosis, { isNewInQueue: true });
       }
       continue;
     } else {
       filled.push(row);
-      if (isNewInQueue) skippedFilled += 1;
+      if (isNewInQueue) {
+        skippedFilled += 1;
+        const diagnosis = diagnoseBddSkipRootCause({ classification });
+        printRootCause(id, diagnosis, { isNewInQueue: true });
+      }
       continue;
+    }
+
+    let eligibility = null;
+    if (!forceSet.has(id)) {
+      try {
+        eligibility = await evaluateBddPollEligibility(id, detail);
+        if (!eligibility.proceed) {
+          filled.push(row);
+          if (isNewInQueue) skippedFilled += 1;
+          const diagnosis = diagnoseBddSkipRootCause({ eligibility, classification });
+          printRootCause(id, diagnosis, { isNewInQueue });
+          continue;
+        }
+      } catch (e) {
+        errors.push({ id, title: task.title, error: e.message || String(e) });
+        const diagnosis = diagnoseBddSkipRootCause({
+          error: `elegibilidade: ${e.message || e}`,
+          classification,
+        });
+        printRootCause(id, diagnosis, { isNewInQueue });
+        continue;
+      }
     }
 
     if (
@@ -190,27 +218,44 @@ async function scanAndProcessQaQueue(tasks, forceSet, newInQueueSet, onProgress,
             ...task,
             _prefetchedDetail: detail,
             _classification: classification,
+            _pollEligibility: eligibility,
           },
         ],
         quiet: false,
       });
-      if (result.crm.ok > 0 || (result.crm.linkedQa && result.crm.linkedQa > 0)) {
+      const gravado = result.crm.ok > 0 || (result.crm.linkedQa && result.crm.linkedQa > 0);
+      if (gravado) {
         generated += 1;
         printGeneratedSuccess(row, { field: result.crm.lastField });
-      } else if (result.crm.failed > 0) {
-        printGeneratedError(
-          id,
-          'Falha ao gravar cenários no CRM (verifique campo UF e entityTypeId do card)'
-        );
-      } else if (result.processed > 0 || result.crm.skipped > 0) {
-        const motivo =
-          result.crm.linkedQa > 0
-            ? 'BDD gravado em card(s) QA vinculado(s) (BITRIX_BDD_PUSH_TARGET=linked)'
-            : 'BDD gerado sem gravação no CRM (sem cenários válidos, card Dev-only ou vínculo QA ausente)';
-        printCrmNotUpdated(row, motivo);
+      } else {
+        const diagnosis = diagnoseBddSkipRootCause({
+          detail,
+          bdd: result.lastBdd,
+          classification,
+          eligibility: result.eligibility || eligibility,
+          crmResult: result.crm,
+          linkedQaResult: result.linkedQaResult,
+          publicavel: result.publicavel,
+          generated: result.processed > 0,
+          error: result.generationError,
+        });
+        if (result.crm.failed > 0) {
+          printGeneratedError(id, diagnosis.reason);
+        } else {
+          printCrmNotUpdated(row, diagnosis.reason);
+        }
+        if (isNewInQueue || !gravado) {
+          printRootCause(id, diagnosis, { isNewInQueue });
+        }
       }
     } catch (e) {
-      printGeneratedError(id, e.message || String(e));
+      const diagnosis = diagnoseBddSkipRootCause({
+        error: e.message || String(e),
+        classification,
+        eligibility,
+      });
+      printGeneratedError(id, diagnosis.reason);
+      printRootCause(id, diagnosis, { isNewInQueue });
     }
 
     const delay = pollItemDelayMs();

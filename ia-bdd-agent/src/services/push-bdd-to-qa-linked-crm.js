@@ -13,6 +13,7 @@ const {
   linkedCardNeedsBddSync,
   contarCenariosGherkin,
 } = require('../utils/bdd-canonical-for-linked');
+const { linkedQaMustBeEmptyEnabled } = require('../utils/bdd-poll-rules');
 const {
   resolveQaStageIds,
   resolveDevStageIds,
@@ -298,23 +299,27 @@ async function pushBddToQaLinkedCrmItems(sourceItemId, bdd, options = {}) {
     const classification = classifyBddQaItemAction(childDetail || {});
     const flatChild = flattenItem(childDetail || {});
     const { text: linkedExisting } = qaBddFieldTextFromFlat(flatChild);
-    const precisaSync = linkedCardNeedsBddSync(linkedExisting, bdd);
+    const precisaSync =
+      linkedQaMustBeEmptyEnabled() ?
+        false
+      : linkedCardNeedsBddSync(linkedExisting, bdd);
 
     if (
-      !precisaSync &&
-      (classification.action === 'skip_filled' ||
-        classification.action === 'skip_qa_history')
+      classification.action === 'skip_filled' ||
+      classification.action === 'skip_qa_history'
     ) {
-      skippedAlreadyFilled += 1;
-      if (!quiet) {
-        const fk =
-          classification.fieldKey ||
-          bddQaStorageFirstFilledFieldKey(childDetail || {});
-        console.log(
-          `📎 Card QA ${row.id} (${row.title || 'sem título'}) — ${classification.reason}${fk ? ` (${fk})` : ''}`
-        );
+      if (!precisaSync) {
+        skippedAlreadyFilled += 1;
+        if (!quiet) {
+          const fk =
+            classification.fieldKey ||
+            bddQaStorageFirstFilledFieldKey(childDetail || {});
+          console.log(
+            `📎 Card QA ${row.id} (${row.title || 'sem título'}) — ${classification.reason}${fk ? ` (${fk})` : ''}`
+          );
+        }
+        continue;
       }
-      continue;
     }
 
     if (!quiet && precisaSync && classification.action === 'skip_filled') {
