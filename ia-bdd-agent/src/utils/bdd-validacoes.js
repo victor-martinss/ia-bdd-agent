@@ -31,7 +31,7 @@ function splitResultadoDevEmAssercoes(resultado) {
   if (!t) return [];
 
   let parts = t
-    .split(/\s+-\s+(?=(?:Caso|Usuário|Na\s|O\s|A\s|O\s+modal|O\s+botão|O\s+ícone))/i)
+    .split(/\s+-\s+(?=(?:Dado|Given|Caso|Usuário|Na\s|O\s|A\s|O\s+modal|O\s+botão|O\s+ícone))/i)
     .map((p) => p.trim())
     .filter((p) => p.length >= 12);
   if (parts.length > 1) {
@@ -51,7 +51,17 @@ function splitResultadoDevEmAssercoes(resultado) {
   if (parts.length > 1) return expandirPartesResultadoDev(parts);
 
   const coladas = splitAssercoesColadas(t);
-  return expandirPartesResultadoDev(coladas.length ? coladas : [t]);
+  parts = expandirPartesResultadoDev(coladas.length ? coladas : [t]);
+  if (parts.length === 1 && parts[0].length > 80) {
+    const extra = parts[0]
+      .split(
+        /\s+(?=(?:Os|As|O|A|Nenhum|Cada|Se |Uma |A aplicação|A requisição|A alteração|O usuário|O token|O cadastro)\s+)/
+      )
+      .map((p) => p.trim())
+      .filter((p) => p.length >= 12);
+    if (extra.length > 1) parts = extra;
+  }
+  return parts;
 }
 
 /** Normaliza partes do Resultado Dev (setas => e frases completas). */
@@ -84,26 +94,53 @@ function formatarEntaoDevResultado(parte) {
   return entaoVerificavelDev(p);
 }
 
-function splitAssercoesColadas(texto) {
-  const t = String(texto || '').trim();
-  if (!t || !/\s+-\s+/.test(t)) return t ? [t] : [];
+const LOOKAHEAD_ASSERCAO_DEV =
+  /(?:Não|Nao|Somente|Para\s|cada\s|Cada\s|Exames|Existem|Existe|Estou|Clico|Gerencio|O\s|A\s|Os\s|As\s|Nenhum|Nenhuma|Se\s|Após|Depois|O título|A coluna|A listagem|A tabela|O botão|O documento|A página|Não devem|Não deve|O usuário|As abas|O filtro|O padrão|O texto|A API|A aplicação|O cadastro|O serviço|O sistema|A requisição|O recebimento|O processo|O estudo|A solicitação|[A-ZÁÉÍÓÚÂÊÔÃÕÇ])/;
 
-  const lookahead =
-    /(?:Não|Nao|Somente|Exames|Existem|Existe|Estou|Clico|Gerencio|O\s|A\s|Os\s|As\s|Nenhum|Nenhuma|Deve|O título|A coluna|A listagem|A tabela|O botão|O documento|A página|Não devem|Não deve|O usuário|As abas|O filtro|O padrão|O texto|A API|[A-ZÁÉÍÓÚÂÊÔÃÕÇ])/;
-
-  const porTraco = t
-    .split(new RegExp(`\\s+-\\s+(?=${lookahead.source})`))
-    .map((p) => p.replace(/[.…]+$/g, '').trim())
-    .filter((p) => p.length >= 6);
-
-  if (porTraco.length > 1) return porTraco;
+/** Separa frases coladas por espaço duplo ou início de nova asserção (Dev GWT). */
+function splitAssercoesEspacoDuplo(texto) {
+  const t = String(texto || '')
+    .trim()
+    .replace(/\s*---+\s*$/g, '')
+    .replace(/…+$/g, '')
+    .trim();
+  if (!t) return [];
 
   const porEspaco = t
     .split(/\s{2,}(?=[A-ZÁÉÍÓÚÂÊÔÃÕÇ])/)
     .map((p) => p.trim())
-    .filter((p) => p.length >= 8);
+    .filter((p) => p.length >= 10);
 
-  return porEspaco.length > 1 ? porEspaco : [t];
+  if (porEspaco.length > 1) return porEspaco;
+
+  const porInicio = t
+    .split(
+      /\s+(?=(?:Para cada|Cada nó|Cada\s|As portas|Os campos|O cadastro|A aplicação|O serviço|A requisição|A alteração|A migração|Uma mensagem|As unidades|As informações|O token|O espaço|O limite|O estudo|O gatilho|Nenhum nó|Nenhum token|Nenhum arquivo|Nenhuma|Se o protocolo|Se o storage|Após a conclusão|O processo|O recebimento|A solicitação)\b)/i
+    )
+    .map((p) => p.trim())
+    .filter((p) => p.length >= 12);
+
+  if (porInicio.length > 1) return porInicio;
+
+  return [t];
+}
+
+function splitAssercoesColadas(texto) {
+  const t = String(texto || '')
+    .trim()
+    .replace(/\s*---+\s*$/g, '');
+  if (!t) return [];
+
+  if (/\s+-\s+/.test(t)) {
+    const porTraco = t
+      .split(new RegExp(`\\s+-\\s+(?=${LOOKAHEAD_ASSERCAO_DEV.source})`))
+      .map((p) => p.replace(/[.…]+$/g, '').trim())
+      .filter((p) => p.length >= 6);
+    if (porTraco.length > 1) return porTraco;
+  }
+
+  const porEspaco = splitAssercoesEspacoDuplo(t);
+  return porEspaco.length ? porEspaco : [t];
 }
 
 /**
@@ -163,11 +200,15 @@ function extrairValidacoesExatas(ctx) {
 function extrairAssertaoDeBlocoDev(texto) {
   const t = limparTexto(String(texto || ''));
   if (!t || t.length < 10) return '';
+  const mRes = t.match(/resultado\s+esperado\s*:\s*(.+)$/is);
+  if (mRes && mRes[1].trim().length >= 12) return mRes[1].trim();
+  const mDevera = t.match(/dever[aá]\s+(.+)$/is);
+  if (mDevera && mDevera[1].trim().length >= 12) return mDevera[1].trim();
   const m = t.match(/^\d+\s*[-–—.)]+\s*(.+)$/);
   const corpo = (m ? m[1] : t).trim();
   if (corpo.length < 10) return '';
   if (
-    /\b(fica|deve|exibe|aparece|mostra|mantém|mantem|permanece|não|nao|devem|são|sao|é|e\s+o\s+|e\s+a\s+|com\s+espaçamento|com\s+espacamento)\b/i.test(
+    /\b(fica|deve|exibe|aparece|mostra|mantém|mantem|permanece|não|nao|devem|são|sao|é|e\s+o\s+|e\s+a\s+|com\s+espaçamento|com\s+espacamento|retornad|anonimiz|formato)\b/i.test(
       corpo
     )
   ) {
@@ -181,17 +222,34 @@ function extrairAssertaoDeBlocoDev(texto) {
  */
 function entaoAssertivoDoContexto(ctx, textoDevFallback = '') {
   const corpoBloco = limparTexto(textoDevFallback);
+  const { entaoVerificavelDev } = require('./bdd-gherkin');
   const fromDevText = extrairEntaoDoTexto(corpoBloco);
   if (fromDevText) {
-    const ev = entaoVerificavel(fromDevText);
-    if (ev && !entaoEhVago(ev)) return `  Então ${ev}`;
+    const ev = entaoVerificavelDev(fromDevText) || entaoVerificavel(fromDevText);
+    if (ev && !entaoEhVago(ev) && !fraseEhIncompleta(ev)) return `  Então ${ev}`;
   }
 
   const assertaoLista = extrairAssertaoDeBlocoDev(corpoBloco);
   if (assertaoLista) {
-    const ev = entaoVerificavel(assertaoLista);
-    // Assertões explícitas do Dev (lista numerada) não passam por fraseEhIncompleta — marcas como MobileMed geram falso positivo.
-    if (ev && !entaoEhVago(ev)) return `  Então ${ev}`;
+    const ev = entaoVerificavelDev(assertaoLista) || entaoVerificavel(assertaoLista);
+    if (ev && !entaoEhVago(ev) && !fraseEhIncompleta(ev)) return `  Então ${ev}`;
+  }
+
+  const temBlocoDev =
+    corpoBloco.length >= 16 ||
+    /resultado\s+esperado\s*:|descri[cç][ãa]o\s*:|given\s*:|when\s*:|then\s*:/i.test(
+      corpoBloco
+    );
+
+  if (temBlocoDev) {
+    const mRes = corpoBloco.match(/resultado\s+esperado\s*:\s*(.+)$/is);
+    if (mRes) {
+      const frases = splitResultadoDevEmAssercoes(mRes[1])
+        .map((f) => formatarEntaoDevResultado(f))
+        .filter((ev) => ev && !entaoEhVago(ev) && !fraseEhIncompleta(ev));
+      if (frases[0]) return `  Então ${frases[0]}`;
+    }
+    return null;
   }
 
   const validacoes = extrairValidacoesExatas(ctx);
@@ -236,6 +294,7 @@ module.exports = {
   splitResultadoDevEmAssercoes,
   formatarEntaoDevResultado,
   splitAssercoesColadas,
+  splitAssercoesEspacoDuplo,
   extrairAssertaoDeBlocoDev,
   extrairValidacoesExatas,
   entaoAssertivoDoContexto,

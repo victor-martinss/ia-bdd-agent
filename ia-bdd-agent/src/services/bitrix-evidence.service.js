@@ -124,6 +124,8 @@ async function listTimelineFiles(entityTypeId, itemId) {
           out.push({
             id: idFile,
             url,
+            urlPreview: f.urlPreview || f.URL_PREVIEW || '',
+            urlShow: f.urlShow || f.URL_SHOW || '',
             name,
             type: classificarArquivo(name, f.type),
             source: 'timeline',
@@ -237,19 +239,50 @@ async function downloadDiskFile(fileId) {
   }
 }
 
-async function downloadUrlAsBase64(url) {
+function pareceImagem(bytes) {
+  if (!bytes || bytes.length < 4) return false;
+  const b = Buffer.from(bytes);
+  if (b[0] === 0xff && b[1] === 0xd8) return true;
+  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return true;
+  if (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46) return true;
+  if (b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46) return true;
+  return false;
+}
+
+function pareceVideo(bytes) {
+  if (!bytes || bytes.length < 12) return false;
+  const b = Buffer.from(bytes);
+  if (b[4] === 0x66 && b[5] === 0x74 && b[6] === 0x79 && b[7] === 0x70) return true;
+  return false;
+}
+
+async function downloadUrlAsBase64(url, opts = {}) {
   if (!url || !/^https?:\/\//i.test(url)) return null;
+  const expect = opts.expectType || 'image';
   try {
     const bin = await axios.get(url, {
       responseType: 'arraybuffer',
       timeout: 45000,
       maxContentLength: 8 * 1024 * 1024,
+      maxRedirects: 5,
     });
     const contentType = bin.headers['content-type'] || 'application/octet-stream';
-    if (!String(contentType).startsWith('image/')) return null;
+    const data = bin.data;
+    const isImg =
+      String(contentType).startsWith('image/') || pareceImagem(data);
+    const isVid =
+      String(contentType).startsWith('video/') || pareceVideo(data);
+    if (expect === 'image' && !isImg) return null;
+    if (expect === 'video' && !isVid) return null;
     return {
-      base64: Buffer.from(bin.data).toString('base64'),
-      contentType,
+      base64: Buffer.from(data).toString('base64'),
+      contentType: isVid
+        ? contentType.startsWith('video/')
+          ? contentType
+          : 'video/mp4'
+        : contentType.startsWith('image/')
+          ? contentType
+          : 'image/png',
       url,
     };
   } catch {
@@ -257,10 +290,84 @@ async function downloadUrlAsBase64(url) {
   }
 }
 
+async function downloadEvidenceFile(arquivo) {
+  if (!arquivo) return null;
+  const tipo = arquivo.type === 'video' ? 'video' : 'image';
+  const urls = [
+    arquivo.urlPreview,
+    arquivo.urlShow,
+    arquivo.url,
+  ].filter((u) => u && /^https?:\/\//i.test(u));
+
+  if (arquivo.id) {
+    const fromDisk = await downloadDiskFile(arquivo.id);
+    if (fromDisk?.base64) return fromDisk;
+  }
+
+  for (const u of urls) {
+    const data = await downloadUrlAsBase64(u, { expectType: tipo });
+    if (data?.base64) return data;
+  }
+  return null;
+}
+
+/**
+ * Textos dos comentários da timeline CRM (história / contexto da tarefa).
+ * @param {number} entityTypeId
+ * @param {number} itemId
+ * @param {number} [maxComments]
+ */
+async function fetchTimelineCommentTexts(entityTypeId, itemId, maxComments = 12) {
+  if (!BASE_URL) return '';
+  const et = Number(entityTypeId);
+  const id = Number(itemId);
+  if (!Number.isFinite(et) || !Number.isFinite(id)) return '';
+
+  const entityTypes = [
+    `dynamic_${et}`,
+    `CRM_DYNAMIC_${et}`,
+    `DYNAMIC_${et}`,
+  ];
+  const partes = [];
+  const seen = new Set();
+
+  for (const entityType of entityTypes) {
+    try {
+      const res = await axios.post(
+        `${BASE_URL}/crm.timeline.comment.list`,
+        {
+          filter: { ENTITY_ID: id, ENTITY_TYPE: entityType },
+          order: { ID: 'DESC' },
+          select: ['ID', 'COMMENT', 'CREATED'],
+        },
+        { validateStatus: (s) => s >= 200 && s < 500, timeout: 20000 }
+      );
+      if (restErrorMessage(res.data)) continue;
+      for (const row of res.data?.result || []) {
+        const txt = String(row.COMMENT || row.comment || '')
+          .replace(/<[^>]+>/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+        if (!txt || txt.length < 8 || seen.has(txt)) continue;
+        seen.add(txt);
+        partes.push(txt);
+        if (partes.length >= maxComments) break;
+      }
+      if (partes.length) break;
+    } catch {
+      /* próximo entityType */
+    }
+  }
+
+  return partes.join('\n\n');
+}
+
 module.exports = {
   listEvidenceFromCrmItem,
   downloadDiskFile,
   downloadUrlAsBase64,
+  downloadEvidenceFile,
+  fetchTimelineCommentTexts,
   classificarArquivo,
   extrairMidiaDeHtml,
 };

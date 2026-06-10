@@ -28,6 +28,26 @@ function linkedSyncAlwaysEnabled() {
   return process.env.BITRIX_LINKED_BDD_ALWAYS_SYNC !== '0';
 }
 
+/** Pai com múltiplos Então ou ambiente quebrado — preferir BDD gerado agora. */
+function parentBddTemDefeitosEstruturais(text) {
+  if (!text || typeof text !== 'string') return false;
+  const { cenarios } = parseFeatureEmCenarios(text);
+  for (const c of cenarios) {
+    const corpo = (c.linhas || []).join('\n');
+    const entoes = corpo.split(/\r?\n/).filter((l) => /^\s*ent[aã]o\s+/i.test(l.trim()));
+    if (entoes.length > 1) return true;
+    if (/\[MobilePACS|\[MobileRouter/i.test(corpo)) return true;
+    if (/\[b\]|\[\/b\]/i.test(corpo)) return true;
+    if (/…/.test(corpo)) return true;
+    if (/lacuna\s*—|defeito observado/i.test(c.titulo || corpo)) return true;
+    for (const ent of entoes) {
+      const corpoEnt = ent.replace(/^\s*ent[aã]o\s+/i, '');
+      if (corpoEnt.length > 220 || /…/.test(corpoEnt)) return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Escolhe o texto BDD a replicar nos atrelados: o que tiver mais cenários (pai × gerado).
  * @param {Record<string, unknown> | null} parentDetail
@@ -43,10 +63,22 @@ function resolveCanonicalBddForLinked(parentDetail, generatedBdd) {
   let bdd = generatedBdd;
   let source = 'gerado';
 
-  if (mirrorFromParentEnabled() && parentText && nParent > nGen) {
+  const paiDefeituoso = parentBddTemDefeitosEstruturais(parentText);
+  if (
+    mirrorFromParentEnabled() &&
+    parentText &&
+    nParent > nGen &&
+    !paiDefeituoso &&
+    process.env.BDD_PREFER_GENERATED_CANONICAL !== '1'
+  ) {
     bdd = parentText;
     source = 'campo_pai';
-  } else if (parentText && nParent === nGen && parentText.length > (generatedBdd || '').length) {
+  } else if (
+    parentText &&
+    nParent === nGen &&
+    parentText.length > (generatedBdd || '').length &&
+    !paiDefeituoso
+  ) {
     bdd = parentText;
     source = 'campo_pai_mesmo_n';
   }

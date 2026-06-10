@@ -76,25 +76,51 @@ function extrairEntaoDoTexto(texto) {
  * Então por bloco Dev: só o que está no bloco; não puxa resultado global em multi-cenário.
  */
 function entaoParaBlocoDev(ctx, corpoBloco) {
+  const { entaoVerificavelDev } = require('./bdd-gherkin');
+  const {
+    extrairAssertaoDeBlocoDev,
+    splitResultadoDevEmAssercoes,
+    formatarEntaoDevResultado,
+  } = require('./bdd-validacoes');
+
+  const mRes = String(corpoBloco || '').match(/resultado\s+esperado\s*:\s*(.+)$/is);
+  if (mRes) {
+    const frases = splitResultadoDevEmAssercoes(mRes[1])
+      .map((f) => formatarEntaoDevResultado(f))
+      .filter(Boolean);
+    const melhor =
+      frases.find((f) => f && !entaoEhVago(f) && !fraseEhIncompleta(f)) ||
+      frases.find((f) => f && !entaoEhVago(f));
+    if (melhor) return `  Então ${melhor}`;
+  }
+
   const bruto = extrairEntaoDoTexto(corpoBloco);
   if (bruto) {
-    const ev = entaoVerificavel(bruto);
-    if (ev && !entaoEhVago(ev)) return `  Então ${ev}`;
+    const ev =
+      entaoVerificavelDev(bruto) || entaoVerificavel(bruto);
+    if (ev && !entaoEhVago(ev) && !fraseEhIncompleta(ev)) return `  Então ${ev}`;
   }
-  const { extrairAssertaoDeBlocoDev } = require('./bdd-validacoes');
+
   const assertaoLista = extrairAssertaoDeBlocoDev(corpoBloco);
   if (assertaoLista) {
-    const { entaoVerificavelDev } = require('./bdd-gherkin');
     const ev = entaoVerificavelDev(assertaoLista) || entaoVerificavel(assertaoLista);
-    if (ev && !entaoEhVago(ev)) return `  Então ${ev}`;
+    if (ev && !entaoEhVago(ev) && !fraseEhIncompleta(ev)) return `  Então ${ev}`;
   }
   return null;
 }
 
 function quandoParaBlocoDev(bloco, ctx) {
-  const { quandoAPartirDeAssertivoDev } = require('./bdd-gherkin');
+  const { quandoAPartirDeAssertivoDev, quandoAPartirDeDescricaoDev } = require('./bdd-gherkin');
   const qa = quandoAPartirDeAssertivoDev(bloco);
   if (qa) return qa;
+
+  const mDesc = String(bloco?.body || '').match(/descri[cç][ãa]o\s*:\s*(.+?)(?:\n|resultado\s+esperado\s*:|$)/is);
+  if (mDesc) {
+    const mAo = mDesc[1].match(/^(?:dado|given)\s+(.+)$/i);
+    const descricao = mAo ? `ao ${mAo[1].trim()}` : mDesc[1].trim();
+    const qw = quandoAPartirDeDescricaoDev(descricao);
+    if (qw && !passoEhVago(qw)) return qw;
+  }
 
   const q = quandoSubstituto(ctx);
   if (q && !passoEhVago(q)) return q;

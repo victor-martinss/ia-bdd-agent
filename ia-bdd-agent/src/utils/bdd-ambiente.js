@@ -22,7 +22,27 @@ const REGRAS_AMBIENTE = [
     confianca: 'alta',
     test: (t) =>
       /\bdicom\b/i.test(t) &&
-      /\b(viewer|visualizador|web|espelhamento|s[eé]rie)\b/i.test(t),
+      /\b(viewer|visualizador|espelhamento)\b/i.test(t) &&
+      !/\b(mobilepacs|mobilerouter|pacs\s*web\/api|storescp|gerenciamento\s+storage)\b/i.test(
+        t
+      ),
+  },
+  {
+    id: 'mobilepacs',
+    label: 'MobilePACS',
+    confianca: 'alta',
+    test: (t) =>
+      /\b(mobilepacs|pacs\s*web\/api|gerenciamento\s+(storage|exames|backup))\b/i.test(
+        t
+      ),
+  },
+  {
+    id: 'mobilerouter',
+    label: 'MobileRouter',
+    confianca: 'alta',
+    test: (t) =>
+      /\b(mobilerouter|storescp|stagescp)\b/i.test(t) ||
+      (/\brouter\b/i.test(t) && /\b(scp|dicom)\b/i.test(t)),
   },
   {
     id: 'portable',
@@ -77,6 +97,22 @@ const REGRAS_AMBIENTE = [
 function detectAmbienteTituloPrioritario(titulo) {
   const t = String(titulo || '');
   if (!t.trim()) return null;
+
+  if (
+    /\b(mobilepacs|pacs\s*web\/api|gerenciamento\s+storage|gest[aã]o\s+de\s+armazenamento)\b/i.test(
+      t
+    )
+  ) {
+    return { id: 'mobilepacs', label: 'MobilePACS', confianca: 'alta' };
+  }
+  if (
+    /\b(mobilerouter|mobile\s*router|storescp|stagescp|servi[cç]o\s+de\s+opera[cç][oõ]es\s+scp)\b/i.test(
+      t
+    ) ||
+    (/\brouter\b/i.test(t) && /\b(dicom|scp)\b/i.test(t))
+  ) {
+    return { id: 'mobilerouter', label: 'MobileRouter', confianca: 'alta' };
+  }
 
   if (/\bportal\s*vet\b/i.test(t)) {
     return { id: 'portal_vet', label: 'Portal Vet', confianca: 'alta' };

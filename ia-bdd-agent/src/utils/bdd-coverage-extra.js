@@ -4,6 +4,8 @@ const {
   passosParaStepsGherkin,
   nomeFuncionalidadeCurto,
   comentarioRefCobertura,
+  entaoVerificavelDev,
+  fraseEhIncompleta,
 } = require('./bdd-gherkin');
 const { extrairValidacoesExatas } = require('./bdd-validacoes');
 
@@ -133,6 +135,8 @@ function montarCenarioExtra(titulo, ctx, passosTexto, entao, refRelacionada = nu
   if (!quando.length) return null;
   linhas.push(...quando);
   if (!entao || /comportamento esperado é observado/i.test(entao)) return null;
+  const corpoEntao = entao.replace(/^\s*ent[aã]o\s+/i, '').trim();
+  if (fraseEhIncompleta(corpoEntao)) return null;
   linhas.push(entao);
   return linhas;
 }
@@ -297,12 +301,14 @@ function gerarCenariosCoberturaExtra(ctx, blocosDev, nomeFuncionalidade) {
       .map((f) => f.trim())
       .filter((f) => f.length > 20 && /deve|validar|testar|verificar|cen[aá]rio|fluxo|erro|mensagem/i.test(f));
     for (const frase of frases.slice(0, max)) {
+      const ev = entaoVerificavelDev(frase.replace(/^deve\s+/i, ''));
+      if (!ev || fraseEhIncompleta(ev)) continue;
       const tituloExtra = `Cobertura — comentário da tarefa`;
       const linhasCom = montarCenarioExtra(
         tituloExtra,
         ctx,
         ctx.passosFiltrados || ctx.passos || frase,
-        entaoExtraAssertivo(ctx, `  Então ${frase.replace(/^deve\s+/i, '').slice(0, 120)}`)
+        entaoExtraAssertivo(ctx, `  Então ${ev}`)
       );
       if (linhasCom) {
         candidatos.push({

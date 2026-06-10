@@ -1,5 +1,9 @@
 const { detectAmbiente, onlyTitleAndDevSources } = require('./bdd-ambiente');
-const { analyzeDevEvidence, evidenceAnalysisEnabled } = require('../services/evidence-analyzer.service');
+const {
+  analyzeDevEvidence,
+  evidenceAnalysisEnabled,
+} = require('../services/evidence-analyzer.service');
+const { fetchTimelineCommentTexts } = require('../services/bitrix-evidence.service');
 const { flattenItem } = require('../agents/parser');
 const { aplicarFiltroContexto } = require('./bdd-context-filter');
 
@@ -95,6 +99,34 @@ async function enrichCtxWithEvidence(ctx, rawItem, title) {
     entityTypeId: flat._entityTypeId || flat.entityTypeId,
     itemId: flat.id || flat.ID,
   };
+
+  if (process.env.BDD_TIMELINE_COMMENTS !== '0') {
+    const timelineTxt = await fetchTimelineCommentTexts(
+      meta.entityTypeId,
+      meta.itemId
+    );
+    if (timelineTxt) {
+      const atual = (base.comentariosTarefa || '').trim();
+      base.comentariosTarefa = atual
+        ? `${atual}\n\n--- histórico timeline ---\n${timelineTxt}`
+        : timelineTxt;
+    }
+    for (const src of ctx._linkedCrmEvidenceSources || []) {
+      if (src.isParentUrlRef) {
+        const paiTxt = await fetchTimelineCommentTexts(
+          src.entityTypeId,
+          src.itemId
+        );
+        if (paiTxt) {
+          const tag = `--- histórico timeline (card ${src.itemId}) ---`;
+          base.comentariosTarefa = [base.comentariosTarefa, `${tag}\n${paiTxt}`]
+            .filter(Boolean)
+            .join('\n\n');
+        }
+        break;
+      }
+    }
+  }
 
   let evidence = await analyzeDevEvidence(flat, base, meta);
 

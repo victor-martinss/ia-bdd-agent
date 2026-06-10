@@ -63,6 +63,11 @@ function buildStructuredBdd(title, ctx) {
 
   if (blocosDev.length > 0) {
     if (
+      blocosDev.length > 0 &&
+      process.env.BDD_DEFEITO_WITH_DEV !== '1'
+    ) {
+      /* cenários Dev cobrem o fluxo — não duplicar com defeito observado */
+    } else if (
       !onlyTitleAndDevSources() &&
       ctx.resultadoObtido &&
       limparTexto(ctx.resultadoObtido)
@@ -226,6 +231,9 @@ function finalizarFeatureBdd(feature, ctx, meta = {}) {
   const numerado = numerarCenariosNaFeature(planificado);
   let final = repararAssercoesColadasNaFeature(numerado);
   final = repararAssercoesColadasNaFeature(final);
+  const { aplicarLimiteEPorCenarioNaFeature } = require('../utils/bdd-gherkin');
+  final = aplicarLimiteEPorCenarioNaFeature(final);
+  final = numerarCenariosNaFeature(final);
   return corrigirQuandoUsuarioArtigo(final);
 }
 
@@ -318,6 +326,12 @@ function montarInputLlm(title, ctx) {
   }
   if (ctx.resultadoEsperado) partes.push('\nResultado esperado:\n' + ctx.resultadoEsperado);
   if (ctx.resultadoObtido) partes.push('\nResultado obtido (defeito):\n' + ctx.resultadoObtido);
+  if (ctx.comentariosTarefaFiltrado || ctx.comentariosTarefa) {
+    partes.push(
+      '\nHistória / comentários da tarefa (timeline):\n' +
+        (ctx.comentariosTarefaFiltrado || ctx.comentariosTarefa)
+    );
+  }
   const ev = ctx.evidenceResumoFiltrado || ctx.evidenceResumo;
   if (ev) partes.push('\nAnálise de evidências Dev (imagens/vídeos):\n' + ev);
   if (ctx.elementosTelaEvidencia?.length) {

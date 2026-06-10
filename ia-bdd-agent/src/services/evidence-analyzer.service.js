@@ -1,8 +1,7 @@
 require('../../load-env');
 const {
   listEvidenceFromCrmItem,
-  downloadDiskFile,
-  downloadUrlAsBase64,
+  downloadEvidenceFile,
 } = require('./bitrix-evidence.service');
 const {
   runVisionEvidenceAnalysis,
@@ -78,9 +77,7 @@ async function analyzeDevEvidence(item, ctx, meta = {}) {
 
   for (const img of images) {
     if (analyzedImages >= maxImagesToAnalyze()) break;
-    let data = null;
-    if (img.id) data = await downloadDiskFile(img.id);
-    if (!data && img.url) data = await downloadUrlAsBase64(img.url);
+    const data = await downloadEvidenceFile(img);
     if (data && data.base64) {
       mediaPayloads.push({ name: img.name, ...data });
       analyzedImages += 1;
@@ -91,9 +88,7 @@ async function analyzeDevEvidence(item, ctx, meta = {}) {
   if (maxVid > 0) {
     for (const vid of videos) {
       if (analyzedVideos >= maxVid) break;
-      let data = null;
-      if (vid.id) data = await downloadDiskFile(vid.id);
-      if (!data && vid.url) data = await downloadUrlAsBase64(vid.url);
+      const data = await downloadEvidenceFile(vid);
       if (!data?.base64) continue;
       const sizeBytes = Math.ceil((data.base64.length * 3) / 4);
       if (sizeBytes > maxVideoBytes()) {
@@ -145,6 +140,14 @@ async function analyzeDevEvidence(item, ctx, meta = {}) {
     }
   } else if ((images.length || videos.length) && !isVisionCapable()) {
     partesResumo.push(`Imagens/vídeos anexados — ${visionSetupHint()}`);
+  } else if (
+    (images.length || videos.length) &&
+    mediaPayloads.length === 0 &&
+    isVisionCapable()
+  ) {
+    partesResumo.push(
+      `${images.length} imagem(ns) e ${videos.length} vídeo(s) listados na timeline — download indisponível (conceda permissão disk.* ao webhook Bitrix ou anexe prints em campo UF do card)`
+    );
   }
 
   return {

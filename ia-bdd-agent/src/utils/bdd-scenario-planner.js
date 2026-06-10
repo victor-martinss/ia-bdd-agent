@@ -556,7 +556,11 @@ function planificarFeatureBdd(feature, ctx, meta = {}) {
   const faltantesDev = gerarCenariosFaltantesDoDev(ctx, semDup);
   const baseComDev = [...semDup, ...faltantesDev];
 
-  const lacunasRaw = gerarCenariosLacunas(ctx, baseComDev, meta)
+  const qtdDevMeta = meta.qtdDev ?? contarBlocosDev(ctx, meta);
+  const lacunasRaw =
+    qtdDevMeta >= 5 && process.env.BDD_GAP_AFTER_DEV !== 'force'
+      ? []
+      : gerarCenariosLacunas(ctx, baseComDev, meta)
     .filter(Boolean)
     .map((linhas) => ({
       titulo: stripPrefixoNumericoCenario(
