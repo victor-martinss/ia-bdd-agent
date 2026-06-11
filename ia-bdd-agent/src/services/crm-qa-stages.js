@@ -13,6 +13,9 @@ const devStageIdsCache = new Map();
 /** @type {Map<number, string[]>} */
 const novoTesteStageIdsCache = new Map();
 
+/** @type {Map<number, string[]>} */
+const testeDeQaStageIdsCache = new Map();
+
 /** @type {Map<string, string>} */
 const stageNameByIdCache = new Map();
 
@@ -38,6 +41,14 @@ function parseNameList(envVar, fallback) {
 function novoTesteStageNameNeedles() {
   const fromEnv = parseNameList('BITRIX_NOVO_TESTE_STAGE_NAMES', 'Novo Teste');
   return fromEnv.length ? fromEnv : ['Novo Teste'];
+}
+
+function testeDeQaStageNameNeedles() {
+  const fromEnv = parseNameList(
+    'BITRIX_TESTE_QA_STAGE_NAMES',
+    'Teste de Q.A,Testes de Q.A,Teste de QA,Testes de QA'
+  );
+  return fromEnv.length ? fromEnv : ['Teste de Q.A', 'Testes de Q.A', 'Teste de QA'];
 }
 
 function qaStageNameNeedles() {
@@ -130,6 +141,17 @@ function looksLikeQaStageName(stageName, devNeedles) {
   return false;
 }
 
+/** Coluna "Teste de Q.A." (exclui Novo Teste). */
+function looksLikeTesteDeQaStageName(stageName) {
+  const name = String(stageName || '').trim().toLowerCase();
+  if (!name) return false;
+  if (/novo\s*teste/i.test(name)) return false;
+  if (/pronto\s+para\s+teste/i.test(name)) return false;
+  if (/teste(s)?\s*(de\s*)?q\.?\s*a\.?/i.test(name)) return true;
+  if (/em\s+teste(s)?\s*(de\s*)?qa/i.test(name)) return true;
+  return false;
+}
+
 async function fetchCategories(entityTypeId) {
   if (!BASE_URL) return [];
   try {
@@ -212,6 +234,33 @@ async function resolveQaStagesDetailed(entityTypeIdNum) {
 /**
  * Resolve STAGE_IDs de colunas QA em categorias/esteiras integradas à validação QA.
  */
+/**
+ * Todos os estágios do SPA (todas as categorias) — para card pai em outro funil.
+ */
+async function resolveAllStagesDetailed(entityTypeIdNum) {
+  const categories = await fetchCategories(entityTypeIdNum);
+  const catIds = categories.length
+    ? categories.map((c) => Number(c.id ?? c.ID)).filter(Number.isFinite)
+    : [0];
+  const rows = [];
+  for (const catId of catIds) {
+    const statuses = await fetchStatusesForCategory(entityTypeIdNum, catId);
+    for (const st of statuses) {
+      const stageName = String(st.NAME || st.name || '').trim();
+      const sid = st.STATUS_ID || st.statusId;
+      if (!sid) continue;
+      const stageId = String(sid);
+      rows.push({
+        stageId,
+        categoryId: catId,
+        stageName,
+      });
+      stageNameByIdCache.set(`${entityTypeIdNum}:${stageId}`, stageName);
+    }
+  }
+  return rows;
+}
+
 async function resolveNovoTesteStageIds(entityTypeIdNum) {
   if (novoTesteStageIdsCache.has(entityTypeIdNum)) {
     return novoTesteStageIdsCache.get(entityTypeIdNum);
@@ -229,6 +278,30 @@ async function resolveNovoTesteStageIds(entityTypeIdNum) {
   for (const r of detailed) {
     stageNameByIdCache.set(`${entityTypeIdNum}:${r.stageId}`, r.stageName);
   }
+  return ids;
+}
+
+async function resolveTesteDeQaStageIds(entityTypeIdNum) {
+  if (testeDeQaStageIdsCache.has(entityTypeIdNum)) {
+    return testeDeQaStageIdsCache.get(entityTypeIdNum);
+  }
+  const needles = testeDeQaStageNameNeedles();
+  const novoNeedles = novoTesteStageNameNeedles();
+  const detailed = await resolveAllStagesDetailed(entityTypeIdNum);
+  const ids = [
+    ...new Set(
+      detailed
+        .filter((r) => {
+          if (stageNameMatchesNeedles(r.stageName, novoNeedles)) return false;
+          return (
+            stageNameMatchesNeedles(r.stageName, needles) ||
+            looksLikeTesteDeQaStageName(r.stageName)
+          );
+        })
+        .map((r) => r.stageId)
+    ),
+  ];
+  testeDeQaStageIdsCache.set(entityTypeIdNum, ids);
   return ids;
 }
 
@@ -310,13 +383,15 @@ async function isNovoTesteStageId(stageId, entityTypeIdNum) {
   return isStageInList(stageId, novo);
 }
 
+async function isTesteDeQaStageId(stageId, entityTypeIdNum) {
+  const cols = await resolveTesteDeQaStageIds(entityTypeIdNum);
+  return isStageInList(stageId, cols);
+}
+
 async function stageDisplayName(stageId, entityTypeIdNum) {
   const key = `${entityTypeIdNum}:${stageId}`;
   if (stageNameByIdCache.has(key)) return stageNameByIdCache.get(key);
-  const detailed = await resolveQaStagesDetailed(entityTypeIdNum);
-  for (const r of detailed) {
-    stageNameByIdCache.set(`${entityTypeIdNum}:${r.stageId}`, r.stageName);
-  }
+  await resolveAllStagesDetailed(entityTypeIdNum);
   return stageNameByIdCache.get(key) || String(stageId || '');
 }
 
@@ -337,17 +412,22 @@ function buildStageFilter(qaStageIds) {
 module.exports = {
   qaStageNameNeedles,
   novoTesteStageNameNeedles,
+  testeDeQaStageNameNeedles,
   qaCategoryNameNeedles,
   devStageNameNeedles,
   resolveQaStageIds,
   resolveNovoTesteStageIds,
+  resolveTesteDeQaStageIds,
+  resolveAllStagesDetailed,
   resolveQaStagesDetailed,
   resolveDevStageIds,
   isQaStageId,
   isNovoTesteStageId,
+  isTesteDeQaStageId,
   isDevStageId,
   isStageInList,
   stageDisplayName,
+  looksLikeTesteDeQaStageName,
   flattenCrmItem,
   buildStageFilter,
   fetchCategories,

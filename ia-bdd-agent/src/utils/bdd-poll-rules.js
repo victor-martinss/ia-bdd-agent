@@ -10,7 +10,14 @@ function linkedQaMustBeEmptyEnabled() {
   return true;
 }
 
+/** Card pai (URL no UF) deve estar em "Teste de Q.A." */
+function parentMustBeTesteQaEnabled() {
+  if (process.env.BITRIX_REQUIRE_PARENT_TESTE_QA === '0') return false;
+  return true;
+}
+
 module.exports = {
   pollOnlyNovoTesteEnabled,
   linkedQaMustBeEmptyEnabled,
+  parentMustBeTesteQaEnabled,
 };

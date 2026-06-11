@@ -72,6 +72,14 @@ function diagnoseBddSkipRootCause(params = {}) {
     };
   }
 
+  if (linkedQaResult?.skippedWrongStage > 0 && !linkedQaResult?.updated) {
+    return {
+      code: 'LINKED_DEST_NOT_NOVO_TESTE',
+      reason: `${linkedQaResult.skippedWrongStage} card(s) QA destino fora de "Novo Teste"`,
+      hints: hintsForEligibilityCode('LINKED_DEST_NOT_NOVO_TESTE'),
+    };
+  }
+
   if (linkedQaResult?.skippedAlreadyFilled > 0 && !linkedQaResult?.updated) {
     return {
       code: 'LINKED_QA_ALREADY_FILLED',
@@ -114,13 +122,27 @@ function diagnoseBddSkipRootCause(params = {}) {
 function hintsForEligibilityCode(code) {
   switch (code) {
     case 'STAGE_NOT_NOVO_TESTE':
-      return ['mova o card para a coluna "Novo Teste" para gerar cenários'];
+    case 'LINKED_NOT_NOVO_TESTE':
+      return ['mova o card atrelado (fila) para a coluna "Novo Teste"'];
+    case 'LINKED_DEST_NOT_NOVO_TESTE':
+      return ['mova o(s) card(s) QA destino para "Novo Teste"'];
+    case 'PARENT_NOT_FOUND':
+      return [
+        'preencha a URL do card pai (feature) no UF do card atrelado',
+        'ex.: crm/type/1272/details/<id>/',
+      ];
+    case 'PARENT_NOT_TESTE_QA':
+    case 'PARENT_STAGE_UNKNOWN':
+      return ['mova o card pai para a coluna "Teste de Q.A."'];
+    case 'PARENT_QA_ALREADY_FILLED':
+      return ['limpe Cenários QA no card pai se quiser regerar'];
     case 'LINKED_QA_ALREADY_FILLED':
+    case 'LINKED_CARD_QA_ALREADY_FILLED':
       return ['limpe o campo Cenários QA no card atrelado se quiser regerar'];
     case 'MAIN_AND_LINKED_QA_FILLED':
-      return ['card principal e atrelado já têm cenários — nenhuma alteração'];
+      return ['card atrelado e destino(s) já têm cenários — nenhuma alteração'];
     case 'NO_LINKED_QA_CARD':
-      return ['vincule um card QA (SPA 1276) ao card de origem'];
+      return ['vincule um card QA (SPA 1276/1294) ao card de origem'];
     default:
       return [];
   }

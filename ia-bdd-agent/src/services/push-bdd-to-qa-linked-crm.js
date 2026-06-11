@@ -13,12 +13,17 @@ const {
   linkedCardNeedsBddSync,
   contarCenariosGherkin,
 } = require('../utils/bdd-canonical-for-linked');
-const { linkedQaMustBeEmptyEnabled } = require('../utils/bdd-poll-rules');
+const {
+  linkedQaMustBeEmptyEnabled,
+  pollOnlyNovoTesteEnabled,
+} = require('../utils/bdd-poll-rules');
 const {
   resolveQaStageIds,
   resolveDevStageIds,
   isQaStageId,
   isDevStageId,
+  isNovoTesteStageId,
+  stageDisplayName,
   flattenCrmItem,
   buildStageFilter,
 } = require('./crm-qa-stages');
@@ -290,12 +295,30 @@ async function pushBddToQaLinkedCrmItems(sourceItemId, bdd, options = {}) {
   let updated = 0;
   const itemIds = [];
   let skippedAlreadyFilled = 0;
+  let skippedWrongStage = 0;
   let failedPush = 0;
 
   for (const row of qaItems) {
     const childDetail = await getTaskDetail(row.id, {
       entityTypeId: row.entityTypeId,
     });
+    const childStageId = String(
+      childDetail?.stageId || childDetail?.STAGE_ID || row.stageId || ''
+    );
+    if (
+      pollOnlyNovoTesteEnabled() &&
+      childStageId &&
+      !(await isNovoTesteStageId(childStageId, row.entityTypeId))
+    ) {
+      skippedWrongStage += 1;
+      if (!quiet) {
+        const label = await stageDisplayName(childStageId, row.entityTypeId);
+        console.log(
+          `📎 Card QA ${row.id} — fora de "Novo Teste" (${label || childStageId}); não grava cenários`
+        );
+      }
+      continue;
+    }
     const classification = classifyBddQaItemAction(childDetail || {});
     const flatChild = flattenItem(childDetail || {});
     const { text: linkedExisting } = qaBddFieldTextFromFlat(flatChild);
@@ -354,6 +377,7 @@ async function pushBddToQaLinkedCrmItems(sourceItemId, bdd, options = {}) {
     updated,
     itemIds,
     skippedAlreadyFilled,
+    skippedWrongStage,
     failed: failedPush,
   };
 }
