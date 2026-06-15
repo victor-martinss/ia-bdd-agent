@@ -39,8 +39,8 @@ function parseNameList(envVar, fallback) {
 }
 
 function novoTesteStageNameNeedles() {
-  const fromEnv = parseNameList('BITRIX_NOVO_TESTE_STAGE_NAMES', 'Novo Teste');
-  return fromEnv.length ? fromEnv : ['Novo Teste'];
+  const fromEnv = parseNameList('BITRIX_NOVO_TESTE_STAGE_NAMES', 'Novo Teste,NEW');
+  return fromEnv.length ? fromEnv : ['Novo Teste', 'NEW'];
 }
 
 function testeDeQaStageNameNeedles() {
@@ -141,6 +141,16 @@ function looksLikeQaStageName(stageName, devNeedles) {
   return false;
 }
 
+/** Coluna "Novo Teste" (inclui estágios Bitrix com sufixo :NEW). */
+function looksLikeNovoTesteStageId(stageId, stageName) {
+  const sid = String(stageId || '').trim();
+  if (/:NEW$/i.test(sid)) return true;
+  if (/:NOVO_TESTE$/i.test(sid)) return true;
+  const name = String(stageName || '').trim().toLowerCase();
+  if (name === 'new' || name === 'novo') return true;
+  return stageNameMatchesNeedles(stageName, novoTesteStageNameNeedles());
+}
+
 /** Coluna "Teste de Q.A." (exclui Novo Teste). */
 function looksLikeTesteDeQaStageName(stageName) {
   const name = String(stageName || '').trim().toLowerCase();
@@ -238,27 +248,37 @@ async function resolveQaStagesDetailed(entityTypeIdNum) {
  * Todos os estágios do SPA (todas as categorias) — para card pai em outro funil.
  */
 async function resolveAllStagesDetailed(entityTypeIdNum) {
-  const categories = await fetchCategories(entityTypeIdNum);
-  const catIds = categories.length
-    ? categories.map((c) => Number(c.id ?? c.ID)).filter(Number.isFinite)
-    : [0];
-  const rows = [];
-  for (const catId of catIds) {
-    const statuses = await fetchStatusesForCategory(entityTypeIdNum, catId);
-    for (const st of statuses) {
-      const stageName = String(st.NAME || st.name || '').trim();
-      const sid = st.STATUS_ID || st.statusId;
-      if (!sid) continue;
-      const stageId = String(sid);
-      rows.push({
-        stageId,
-        categoryId: catId,
-        stageName,
-      });
-      stageNameByIdCache.set(`${entityTypeIdNum}:${stageId}`, stageName);
+  const maxAttempts = Number.parseInt(process.env.BITRIX_STAGE_FETCH_RETRIES || '3', 10) || 3;
+  let lastRows = [];
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const categories = await fetchCategories(entityTypeIdNum);
+    const catIds = categories.length
+      ? categories.map((c) => Number(c.id ?? c.ID)).filter(Number.isFinite)
+      : [0];
+    const rows = [];
+    for (const catId of catIds) {
+      const statuses = await fetchStatusesForCategory(entityTypeIdNum, catId);
+      for (const st of statuses) {
+        const stageName = String(st.NAME || st.name || '').trim();
+        const sid = st.STATUS_ID || st.statusId;
+        if (!sid) continue;
+        const stageId = String(sid);
+        rows.push({
+          stageId,
+          categoryId: catId,
+          stageName,
+        });
+        stageNameByIdCache.set(`${entityTypeIdNum}:${stageId}`, stageName);
+      }
+    }
+    lastRows = rows;
+    if (rows.length > 0) return rows;
+    if (attempt < maxAttempts - 1) {
+      await new Promise((r) => setTimeout(r, 700 * (attempt + 1)));
     }
   }
-  return rows;
+  return lastRows;
 }
 
 async function resolveNovoTesteStageIds(entityTypeIdNum) {
@@ -301,7 +321,9 @@ async function resolveTesteDeQaStageIds(entityTypeIdNum) {
         .map((r) => r.stageId)
     ),
   ];
-  testeDeQaStageIdsCache.set(entityTypeIdNum, ids);
+  if (ids.length > 0 || detailed.length > 0) {
+    testeDeQaStageIdsCache.set(entityTypeIdNum, ids);
+  }
   return ids;
 }
 
@@ -380,19 +402,50 @@ async function isDevStageId(stageId, entityTypeIdNum) {
 
 async function isNovoTesteStageId(stageId, entityTypeIdNum) {
   const novo = await resolveNovoTesteStageIds(entityTypeIdNum);
-  return isStageInList(stageId, novo);
+  if (isStageInList(stageId, novo)) return true;
+  const name = await stageDisplayName(stageId, entityTypeIdNum);
+  return looksLikeNovoTesteStageId(stageId, name);
 }
 
 async function isTesteDeQaStageId(stageId, entityTypeIdNum) {
+  const extraIds = parseNameList('BITRIX_TESTE_QA_STAGE_IDS', '');
+  if (isStageInList(stageId, extraIds)) return true;
   const cols = await resolveTesteDeQaStageIds(entityTypeIdNum);
-  return isStageInList(stageId, cols);
+  if (isStageInList(stageId, cols)) return true;
+  const name = await stageDisplayName(stageId, entityTypeIdNum);
+  return looksLikeTesteDeQaStageName(name);
 }
 
 async function stageDisplayName(stageId, entityTypeIdNum) {
   const key = `${entityTypeIdNum}:${stageId}`;
   if (stageNameByIdCache.has(key)) return stageNameByIdCache.get(key);
   await resolveAllStagesDetailed(entityTypeIdNum);
+  if (stageNameByIdCache.has(key)) return stageNameByIdCache.get(key);
+  await fetchStageNamesForCategoryFromStageId(stageId, entityTypeIdNum);
   return stageNameByIdCache.get(key) || String(stageId || '');
+}
+
+/** Extrai entityTypeId e categoryId de STAGE_ID Bitrix (ex.: DT1272_410:UC_YKVM7T). */
+function parseStageIdParts(stageId) {
+  const m = String(stageId || '').match(/^DT(\d+)_(\d+):/i);
+  if (!m) return null;
+  const entityTypeId = Number.parseInt(m[1], 10);
+  const categoryId = Number.parseInt(m[2], 10);
+  if (!Number.isFinite(entityTypeId) || !Number.isFinite(categoryId)) return null;
+  return { entityTypeId, categoryId };
+}
+
+/** Busca nomes de estágio de uma categoria quando a listagem completa falhou (503). */
+async function fetchStageNamesForCategoryFromStageId(stageId, entityTypeIdNum) {
+  const parts = parseStageIdParts(stageId);
+  if (!parts || parts.entityTypeId !== entityTypeIdNum) return;
+  const statuses = await fetchStatusesForCategory(entityTypeIdNum, parts.categoryId);
+  for (const st of statuses) {
+    const sid = String(st.STATUS_ID || st.statusId || '');
+    const stageName = String(st.NAME || st.name || '').trim();
+    if (!sid) continue;
+    stageNameByIdCache.set(`${entityTypeIdNum}:${sid}`, stageName);
+  }
 }
 
 function flattenCrmItem(item) {
@@ -427,6 +480,7 @@ module.exports = {
   isDevStageId,
   isStageInList,
   stageDisplayName,
+  looksLikeNovoTesteStageId,
   looksLikeTesteDeQaStageName,
   flattenCrmItem,
   buildStageFilter,

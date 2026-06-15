@@ -1,7 +1,7 @@
 /**
  * Elegibilidade do poll:
  * - Card atrelado (fila / destino QA): coluna "Novo Teste" + Cenários QA vazio
- * - Card pai (URL do feature): coluna "Teste de Q.A." + Cenários QA vazio
+ * - Card pai (URL do feature): coluna "Teste de Q.A." (campo QA do pai não bloqueia gravação no atrelado)
  */
 const { flattenItem } = require('../agents/parser');
 const {
@@ -15,6 +15,7 @@ const {
   isNovoTesteStageId,
   isTesteDeQaStageId,
   stageDisplayName,
+  resolveAllStagesDetailed,
 } = require('../services/crm-qa-stages');
 const { discoverBddLinkedTargets, shouldPushBddToMainCard, pushTargetMode } = require('./bdd-push-routing');
 const {
@@ -202,6 +203,8 @@ async function evaluateBddPollEligibility(sourceItemId, detail, opts = {}) {
       };
     }
 
+    await resolveAllStagesDetailed(parent.entityTypeId);
+
     const parentTesteQa = await isTesteDeQaStageId(parentStageId, parent.entityTypeId);
     if (!parentTesteQa) {
       const parentLabel = await stageDisplayName(parentStageId, parent.entityTypeId);
@@ -217,33 +220,9 @@ async function evaluateBddPollEligibility(sourceItemId, detail, opts = {}) {
         atreladoFilled,
       };
     }
-
-    if (parentDetail && qaFieldFilled(parentDetail)) {
-      return {
-        proceed: false,
-        code: 'PARENT_QA_ALREADY_FILLED',
-        reason: `campo Cenários QA já preenchido no card pai ${parent.id} (SPA ${parent.entityTypeId})`,
-        parent,
-        atreladoFilled,
-      };
-    }
   }
 
   const linked = await linkedQaFillState(sourceItemId, detail);
-
-  if (linked.wrongStage.length > 0) {
-    const ids = linked.wrongStage
-      .map((r) => `${r.id} (${r.stageLabel || r.stageId})`)
-      .join(', ');
-    return {
-      proceed: false,
-      code: 'LINKED_DEST_NOT_NOVO_TESTE',
-      reason: `card(s) QA destino fora de "Novo Teste": ${ids}`,
-      atreladoFilled,
-      linked,
-      parent,
-    };
-  }
 
   if (atreladoFilled && linked.anyFilled) {
     return {

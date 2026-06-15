@@ -75,8 +75,21 @@ function useLegacyProcessedIdsGate() {
 }
 
 function pollItemDelayMs() {
-  const n = Number.parseInt(process.env.BDD_POLL_ITEM_DELAY_MS || '450', 10);
-  return Number.isFinite(n) && n >= 0 ? n : 450;
+  const n = Number.parseInt(process.env.BDD_POLL_ITEM_DELAY_MS || '600', 10);
+  return Number.isFinite(n) && n >= 0 ? n : 600;
+}
+
+/** Novos na fila e BDD_POLL_FORCE_IDS processam primeiro (fila grande + Bitrix lento). */
+function prioritizeQueueTasks(tasks, newInQueueSet, forceSet) {
+  if (process.env.BDD_POLL_PRIORITY_NEW === '0') return tasks;
+  const rank = (t) => {
+    const id = normId(t.id);
+    const key = taskQueueKey(t);
+    if (forceSet.has(id)) return 0;
+    if (newInQueueSet.has(key)) return 1;
+    return 2;
+  };
+  return [...tasks].sort((a, b) => rank(a) - rank(b));
 }
 
 function queueDelta(currentTasks, prevQueueIds, hasBaseline) {
@@ -148,13 +161,6 @@ async function scanAndProcessQaQueue(tasks, forceSet, newInQueueSet, onProgress,
 
     if (isNewInQueue || forceSet.has(id)) {
       printNewInQueueAlert(row);
-    } else if (
-      classification.action === 'generate' ||
-      classification.action === 'merge'
-    ) {
-      console.log(
-        `${logTimestampBr()} ○ Item ${id} elegível (${classification.action === 'merge' ? 'atualizar IA' : 'sem cenários'}) — gerando…`
-      );
     }
 
     if (classification.action === 'generate') {
@@ -199,6 +205,16 @@ async function scanAndProcessQaQueue(tasks, forceSet, newInQueueSet, onProgress,
         printRootCause(id, diagnosis, { isNewInQueue });
         continue;
       }
+    }
+
+    if (
+      !isNewInQueue &&
+      !forceSet.has(id) &&
+      (classification.action === 'generate' || classification.action === 'merge')
+    ) {
+      console.log(
+        `${logTimestampBr()} ○ Item ${id} elegível (${classification.action === 'merge' ? 'atualizar IA' : 'sem cenários'}) — gerando…`
+      );
     }
 
     if (
@@ -301,8 +317,21 @@ async function tick() {
     );
   }
 
+  const orderedTasks = prioritizeQueueTasks(tasks, newInQueueSet, forceSet);
+  if (
+    orderedTasks.length !== tasks.length ||
+    orderedTasks.some((t, i) => taskQueueKey(t) !== taskQueueKey(tasks[i]))
+  ) {
+    const n = newInQueueSet.size;
+    if (n > 0) {
+      console.log(
+        `${logTimestampBr()} Prioridade: ${n} novo(s) na fila processado(s) antes dos demais`
+      );
+    }
+  }
+
   const scan = await scanAndProcessQaQueue(
-    tasks,
+    orderedTasks,
     forceSet,
     newInQueueSet,
     (index, total, task) => {
@@ -364,6 +393,24 @@ async function main() {
     console.log('Modo legado: BDD_POLL_LEGACY_PROCESSED_IDS=1');
   }
   console.log('Ctrl+C para encerrar.\n');
+
+  try {
+    const { resolveAllStagesDetailed } = require('./src/services/crm-qa-stages');
+    const { listEntityTypeIdsForQueue } = require('./src/services/bitrix.service');
+    const queueSpas = await listEntityTypeIdsForQueue();
+    const parentSpas = (process.env.BITRIX_PARENT_ENTITY_TYPE_IDS || '1272')
+      .split(/[,;\s]+/)
+      .map((s) => Number.parseInt(s.trim(), 10))
+      .filter((n) => Number.isFinite(n) && n > 0);
+    for (const et of [...new Set([...queueSpas, ...parentSpas])]) {
+      await resolveAllStagesDetailed(et);
+    }
+    console.log(
+      `${logTimestampBr()} Cache de estágios carregado (SPAs ${[...new Set([...queueSpas, ...parentSpas])].join(', ')})`
+    );
+  } catch (e) {
+    console.warn(`${logTimestampBr()} Aviso: cache de estágios parcial —`, e.message || e);
+  }
 
   for (;;) {
     await tick().catch((err) => {

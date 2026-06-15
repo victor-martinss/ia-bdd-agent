@@ -92,8 +92,10 @@ async function discoverBddLinkedTargets(crmItemId, detail = null) {
 /**
  * Gravar no card que originou o processamento (crm.item.update no id da fila)?
  * @param {{ isChildQaCard: boolean, hasLinkedDestinations: boolean }} targets
+ * @param {{ forceMainCard?: boolean }} [opts]
  */
-function shouldPushBddToMainCard(targets) {
+function shouldPushBddToMainCard(targets, opts = {}) {
+  if (opts.forceMainCard) return true;
   if (!targets) return true;
   if (targets.isChildQaCard) return true;
 

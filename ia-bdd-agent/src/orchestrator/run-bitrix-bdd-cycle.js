@@ -179,7 +179,11 @@ async function runBitrixBddCycle(packageRoot, options = {}) {
       }
 
       const targets = await discoverBddLinkedTargets(task.id, detail);
-      const gravarNoCardPrincipal = shouldPushBddToMainCard(targets);
+      const gravarNoCardPrincipal = shouldPushBddToMainCard(targets, {
+        forceMainCard:
+          Boolean(task._queueKey) &&
+          (classification.action === 'generate' || classification.action === 'merge'),
+      });
 
       if (
         podeGravarCrm &&
