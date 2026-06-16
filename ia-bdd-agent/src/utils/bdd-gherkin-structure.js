@@ -91,21 +91,30 @@ function normalizarOrdemPassosNoBloco(b) {
     }
   }
 
-  return { ...b, dado, quando: acao, entao, eAposEntao: [] };
+  return { ...b, dado, quando: acao, entao, eAposEntao: [...(b.eAposEntao || [])] };
+}
+
+function linhasCorpoBlocoCenario(b) {
+  const norm = normalizarOrdemPassosNoBloco(b);
+  return [...norm.dado, ...norm.quando, ...norm.entao, ...(norm.eAposEntao || [])];
 }
 
 function blocoCenarioValido(b) {
   const norm = normalizarOrdemPassosNoBloco(b);
   if (!norm.dado.length || !norm.quando.length || !norm.entao.length) return false;
-  if (norm.eAposEntao.length) return false;
   const entaoTextos = norm.entao.map((e) => e.replace(/^\s*ent[aã]o\s+/i, '').trim().toLowerCase());
   if (new Set(entaoTextos).size !== entaoTextos.length) return false;
   for (const q of norm.quando) {
     const corpo = q.replace(/^\s*(quando|e)\s+/i, '').trim();
-    if (passoEhColagemGherkin(corpo) || passoEhVago(q)) return false;
+    if (passoEhVago(q)) return false;
+    if (passoEhColagemGherkin(corpo) && fraseEhIncompleta(corpo)) return false;
   }
   for (const e of norm.entao) {
     if (entaoEhIncompleto(e.replace(/^\s*ent[aã]o\s+/i, ''))) return false;
+  }
+  for (const e of norm.eAposEntao || []) {
+    const corpo = e.replace(/^\s*e\s+/i, '').trim();
+    if (!corpo || fraseEhIncompleta(corpo)) return false;
   }
   return true;
 }
@@ -148,7 +157,12 @@ function validarEstruturaFeatureGherkin(feature) {
       }
     }
     if (b.eAposEntao.length) {
-      motivos.push(`"${b.titulo.slice(0, 40)}": linhas E após Então (estrutura inválida)`);
+      for (const e of b.eAposEntao) {
+        const corpo = e.replace(/^\s*e\s+/i, '').trim();
+        if (!corpo || fraseEhIncompleta(corpo)) {
+          motivos.push(`"${b.titulo.slice(0, 40)}": E após Então incompleto ou vago`);
+        }
+      }
     }
   }
 
@@ -415,7 +429,7 @@ function repararFeatureGherkinDesconexo(feature, ctx = {}) {
     const norm = normalizarOrdemPassosNoBloco(b);
     if (blocoCenarioValido(norm)) {
       out.push(`Cenário: ${norm.titulo}`);
-      for (const ln of [...norm.dado, ...norm.quando, ...norm.entao]) {
+      for (const ln of linhasCorpoBlocoCenario(norm)) {
         out.push(ln.startsWith('  ') ? ln : `  ${ln.trim()}`);
       }
       out.push('');
@@ -424,15 +438,13 @@ function repararFeatureGherkinDesconexo(feature, ctx = {}) {
     if (norm.dado.length && norm.quando.length && norm.entao.length && ctx.cenariosTesteDev) {
       const bruto = [
         `Cenário: ${norm.titulo}`,
-        ...norm.dado,
-        ...norm.quando,
-        ...norm.entao,
+        ...linhasCorpoBlocoCenario(norm),
       ].join('\n');
       const expandido = repararAssercoesColadasNaFeature(bruto);
       const reb = extrairBlocosCenario(expandido)[0];
       if (reb && reb.dado.length && reb.quando.length && reb.entao.length) {
         out.push(`Cenário: ${reb.titulo}`);
-        for (const ln of [...reb.dado, ...reb.quando, ...reb.entao]) {
+        for (const ln of linhasCorpoBlocoCenario(reb)) {
           out.push(ln.startsWith('  ') ? ln : `  ${ln.trim()}`);
         }
         out.push('');
@@ -480,7 +492,7 @@ function assegurarCenariosCompletos(feature, ctx = {}) {
     const norm = normalizarOrdemPassosNoBloco(b);
     if (blocoCenarioValido(norm)) {
       out.push(`Cenário: ${norm.titulo}`);
-      for (const ln of [...norm.dado, ...norm.quando, ...norm.entao]) {
+      for (const ln of linhasCorpoBlocoCenario(norm)) {
         out.push(ln.startsWith('  ') ? ln : `  ${ln.trim()}`);
       }
       out.push('');
@@ -531,10 +543,15 @@ function expandirLinhaComTracos(linha) {
       })
       .filter(Boolean);
     const maxEntao = maxEntaoPorCenarioDev();
-    return expandidas.length ? expandidas.slice(0, maxEntao) : [linha];
+    if (expandidas.length) return expandidas.slice(0, maxEntao);
+    const evInteiro = formatarEntaoDevResultado(corpo) || entaoVerificavel(corpo);
+    if (evInteiro && !entaoEhIncompleto(evInteiro)) {
+      return [`${pad}Então ${evInteiro}`];
+    }
+    return [linha];
   }
   if (tipo === 'e') {
-    return partes
+    const expandidas = partes
       .map((p) => {
         const obj = objetivarFrase(p, 120);
         if (!obj) return null;
@@ -545,6 +562,7 @@ function expandirLinhaComTracos(linha) {
         return `    E ${eText}`;
       })
       .filter(Boolean);
+    return expandidas.length ? expandidas : [linha];
   }
   if (tipo === 'quando' && partes.length >= 2) {
     const { quandoAPartirDeDescricaoDev } = require('./bdd-gherkin');
@@ -640,4 +658,6 @@ module.exports = {
   corrigirQuandoUsuarioArtigo,
   entaoCompletoDoContexto,
   passosCompletosDoContexto,
+  blocoCenarioValido,
+  linhasCorpoBlocoCenario,
 };

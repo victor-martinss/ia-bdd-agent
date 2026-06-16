@@ -113,14 +113,23 @@ function splitAssercoesEspacoDuplo(texto) {
 
   if (porEspaco.length > 1) return porEspaco;
 
-  const porInicio = t
+  const porInicioSeguro = t
     .split(
-      /\s+(?=(?:Para cada|Cada nó|Cada\s|As portas|Os campos|O cadastro|A aplicação|O serviço|A requisição|A alteração|A migração|Uma mensagem|As unidades|As informações|O token|O espaço|O limite|O estudo|O gatilho|Nenhum nó|Nenhum token|Nenhum arquivo|Nenhuma|Se o protocolo|Se o storage|Após a conclusão|O processo|O recebimento|A solicitação)\b)/i
+      /\s+(?=(?:Para cada|Cada nó|Cada\s|As portas|Os campos|O cadastro|A aplicação|O serviço|A requisição|A alteração|A migração|As unidades|As informações|O token|O espaço|O estudo|O gatilho|Nenhum nó|Nenhum token|Nenhum arquivo|Se o protocolo|Se o storage|Após a conclusão|O processo|O recebimento|A solicitação)\b)/i
     )
     .map((p) => p.trim())
     .filter((p) => p.length >= 12);
 
-  if (porInicio.length > 1) return porInicio;
+  if (porInicioSeguro.length > 1) return porInicioSeguro;
+
+  const porInicioAposPonto = t
+    .split(
+      /(?<=[.!?])\s+(?=(?:Uma mensagem|Nenhuma|O limite|O sistema)\b)/i
+    )
+    .map((p) => p.trim())
+    .filter((p) => p.length >= 12);
+
+  if (porInicioAposPonto.length > 1) return porInicioAposPonto;
 
   return [t];
 }

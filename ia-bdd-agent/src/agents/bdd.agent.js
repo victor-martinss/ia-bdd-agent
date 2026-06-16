@@ -451,10 +451,16 @@ async function generateBDD(title, item) {
   const assertiveRefine =
     assertiveRefineDevEnabled(ctx) && blocosDev.length > 0;
 
+  const structuredCoversDev =
+    blocosDev.length > 0 &&
+    (feature.match(/^Cen[aá]rio\s+\d+/gim) || []).length >= blocosDev.length &&
+    bddLlmOutputValido(feature, ctx);
+
   if (
     llmOn &&
     llmRefineEnabled() &&
     !forceLlm &&
+    !structuredCoversDev &&
     (ngfRich || titleOnly || assertiveRefine)
   ) {
     try {

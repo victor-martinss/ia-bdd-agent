@@ -55,6 +55,31 @@ function fraseEhIncompleta(texto) {
   if (/,\s*$/.test(t) || /^ap[oó]s\s+alguns\s+instantes,?\s*$/i.test(t)) return true;
   if (/\b(sugerindo|caso|quando|onde|enquanto)\s*$/i.test(t)) return true;
   if (/\bdeve\s*$/i.test(t) || /\bdeve\s+(ser|serem)\s*$/i.test(t)) return true;
+  // Asserções Then Dev (Gherkin inglês) sem "deve"
+  if (
+    t.length >= 15 &&
+    !TERMINACOES_INCOMPLETAS.test(t) &&
+    (/^nenhum[a]?\s+.+\bgerad[oa]s?\b/i.test(t) ||
+      /\bo\s+sistema\s+exibe\b/i.test(t) ||
+      /\b(foi|foram)\s+ultrapassad[oa]s?\b/i.test(t) ||
+      /\b(é|são)\s+gerad[oa]s?\b/i.test(t) ||
+      /\bum\s+laudo\s+(é|foi)\b/i.test(t) ||
+      /\bo\s+usu[aá]rio\s+pode\b/i.test(t))
+  ) {
+    return false;
+  }
+  // Pré-condições Given GWT: "está no portal", "selecionou N imagens"
+  if (
+    t.length >= 12 &&
+    (/\best[aá]\s+(?:no|na|em|logado)\b/i.test(t) ||
+      /\bselecionou\s+\d+\s+/i.test(t))
+  ) {
+    return false;
+  }
+  // Ações When Dev GWT: "clica no botão…"
+  if (t.length >= 15 && /\bclica\s+(?:no|em)\s+bot[aã]o\b/i.test(t)) {
+    return false;
+  }
   if (
     !/\b(deve|dever[aá]|n[aã]o deve|n[aã]o pode|devem|precisa|retornar|exibir|ocorrer|ser)\b/i.test(
       t
@@ -355,6 +380,7 @@ function nomeFuncionalidadeCurto(titulo) {
   if (partes.length >= 2) {
     const mod = normalizarTitulo(partes[0].replace(/^\[?\s*FEATURE\s*\]?\s*/i, ''));
     const fluxo = normalizarTitulo(partes.slice(1).join(', '));
+    if (!mod) return fluxo || normalizarTitulo(t);
     return fluxo ? `${mod}, ${fluxo}` : mod;
   }
 
@@ -791,8 +817,11 @@ function separarTiposLinhas(linhas) {
   const acao = [];
   /** @type {string[]} */
   const entoes = [];
+  /** @type {string[]} */
+  const ePosEntao = [];
   let mas = null;
   let viuQuando = false;
+  let viuEntao = false;
 
   for (const ln of linhas || []) {
     const t = String(ln || '').trimEnd();
@@ -802,6 +831,7 @@ function separarTiposLinhas(linhas) {
       continue;
     }
     if (/^\s*Então/i.test(t)) {
+      viuEntao = true;
       entoes.push(t.startsWith('  ') ? t : `  ${t.trim()}`);
       continue;
     }
@@ -816,6 +846,10 @@ function separarTiposLinhas(linhas) {
     }
     if (isLinhaE(t)) {
       const norm = t.startsWith('    ') ? t : `    E ${t.replace(/^\s*E\s+/i, '').trim()}`;
+      if (viuEntao) {
+        ePosEntao.push(norm);
+        continue;
+      }
       if (!viuQuando && !acao.length) dado.push(norm);
       else acao.push(norm);
       continue;
@@ -825,7 +859,7 @@ function separarTiposLinhas(linhas) {
   }
 
   const entao = entoes[0] || null;
-  return { dado, acao, entao, entoes, mas };
+  return { dado, acao, entao, entoes, mas, ePosEntao };
 }
 
 function listaEntoesSeparados(separado) {
@@ -1058,6 +1092,7 @@ function garantirUmEntaoPorCenario(linhasCorpo) {
   const entoes = fundirEntoesEmUm(listaEntoesSeparados(sep));
   const out = [...sep.dado, ...sep.acao];
   if (entoes.length) out.push(...entoes);
+  if (sep.ePosEntao?.length) out.push(...sep.ePosEntao);
   if (sep.mas) out.push(sep.mas);
   return out;
 }
@@ -1085,6 +1120,7 @@ function compactarCorpoCenario(linhasCorpo) {
       ...eDadoLimitado,
       ...sep.acao,
       ...entoes,
+      ...(sep.ePosEntao || []),
     ]);
     if (sep.mas) out.push(sep.mas);
     return out;
@@ -1106,6 +1142,7 @@ function compactarCorpoCenario(linhasCorpo) {
   else if (sep.entao && !fraseEhIncompleta(sep.entao.replace(/^\s*ent[aã]o\s+/i, ''))) {
     out.push(sep.entao);
   }
+  if (sep.ePosEntao?.length) out.push(...sep.ePosEntao);
   if (sep.mas) out.push(sep.mas);
   return out;
 }
@@ -1132,6 +1169,7 @@ function dividirCenarioCompletoPorMaxE(tituloBase, linhasCorpo, opts = {}) {
   if (acaoPreFormatada && listaEntao.length && textosAcao.length <= janela) {
     const corpo = [...dado, ...acao];
     corpo.push(...listaEntao);
+    if (separado.ePosEntao?.length) corpo.push(...separado.ePosEntao);
     if (mas) corpo.push(mas);
     return [montarBlocoCenario(tituloBase, corpo, opts)];
   }
@@ -1564,6 +1602,13 @@ function corpoTemFormatoGwtDev(body) {
   return /(?:\*\*)?\s*(?:given|when|then)\s*:/i.test(String(body || ''));
 }
 
+/** Remove marcador de lista em linhas Given/When/Then Dev. */
+function limparBulletGwtDev(texto) {
+  return limparMarkdownCru(String(texto || ''))
+    .replace(/^[-–—•*]\s+/, '')
+    .trim();
+}
+
 /** Pré-condição Given → passo E (sem prefixar "o usuário" em "Existe…"). */
 function preparacaoGivenParaE(texto) {
   const prep = objetivarFraseDev(texto) || limparTexto(texto);
@@ -1621,7 +1666,7 @@ function parseSecoesGwtDev(body) {
       continue;
     }
     if (!phase) continue;
-    const clean = limparMarkdownCru(l).trim();
+    const clean = limparBulletGwtDev(l);
     if (clean) sections[phase].push(clean);
   }
 
@@ -1733,7 +1778,9 @@ function montarPassosDeSecoesGwt(gwt) {
     for (const fr of frases.slice(0, maxGiven)) {
       if (textoEhLixoEvidenciaOuTimeline(fr)) continue;
       const eText = preparacaoGivenParaE(fr);
-      if (eText && !passoEhColagemGherkin(eText)) eSteps.push(`    E ${eText}`);
+      if (eText && eText.length >= 10 && !textoEhLixoEvidenciaOuTimeline(eText)) {
+        eSteps.push(`    E ${eText}`);
+      }
     }
   }
 
@@ -1765,8 +1812,14 @@ function montarPassosDeSecoesGwt(gwt) {
 
   /** @type {string[]} */
   const entaoList = [];
+  /** @type {string[]} */
+  const ePosEntao = [];
   for (const t of gwt.then) {
-    for (const parte of splitResultadoDevEmAssercoes(t)) {
+    const limpo = limparBulletGwtDev(t);
+    if (!limpo) continue;
+    const partes =
+      limpo.length > 140 ? splitResultadoDevEmAssercoes(limpo) : [limpo];
+    for (const parte of partes) {
       const ev = formatarEntaoDevResultado(parte);
       if (ev && !fraseEhIncompleta(ev)) {
         entaoList.push(`  Então ${ev}`);
@@ -1774,6 +1827,12 @@ function montarPassosDeSecoesGwt(gwt) {
     }
   }
   const entaoFundido = fundirEntoesEmUm(entaoList);
+  for (let i = 1; i < entaoList.length; i++) {
+    const corpo = entaoList[i].replace(/^\s*ent[aã]o\s+/i, '').trim();
+    if (corpo && !fraseEhIncompleta(corpo)) {
+      ePosEntao.push(`    E ${corpo.charAt(0).toLowerCase() + corpo.slice(1)}`);
+    }
+  }
 
   return {
     quando,
@@ -1781,6 +1840,7 @@ function montarPassosDeSecoesGwt(gwt) {
     entaoList: entaoFundido,
     eSteps: limitarESteps(eSteps, Math.min(2, maxEPorCenario())),
     ePosQuando,
+    ePosEntao,
   };
 }
 
@@ -2188,7 +2248,7 @@ function textoEhLixoEvidenciaOuTimeline(texto) {
   return (
     /^--\s/.test(t) ||
     /\[\/?b\]|\[url\]|bbcode|anexos\]/i.test(t) ||
-    /arrastar e soltar|navegar para 'dashboard'|clica no botão|reenviar estudo/i.test(t) ||
+    /arrastar e soltar|navegar para 'dashboard'|clica no botão reenviar|reenviar estudo/i.test(t) ||
     /aguarda o processamento e a exibição do estudo/i.test(t)
   );
 }
@@ -2339,6 +2399,7 @@ function cenariosQaAPartirDoDev(bloco, ctx, nomeFuncionalidade) {
       quando,
       ...(passosCorpo.ePosQuando || []),
       ...entoes,
+      ...(passosCorpo.ePosEntao || []),
     ];
     return dividirCenarioCompletoPorMaxE(titulo, corpo, { refDev });
   }

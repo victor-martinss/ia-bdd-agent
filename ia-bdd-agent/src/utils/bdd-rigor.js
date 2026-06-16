@@ -262,7 +262,13 @@ function rigorizarFeatureBdd(feature, ctx = {}) {
     }
 
     if (/^\s*e\s+/i.test(t) && !/^\s*então/i.test(t)) {
-      if (temEntaoNoCenario) continue;
+      if (temEntaoNoCenario) {
+        const corpoE = t.replace(/^\s*e\s+/i, '').trim();
+        if (corpoE && !fraseEhIncompleta(corpoE) && !passoEhVago(t)) {
+          out.push(trimmed.replace(/^\s*/, '    '));
+        }
+        continue;
+      }
       if (linhaEInvalida(t) || passoEhVago(t)) continue;
       if (/^e\s+o\s+usu[aá]rio\s+informa dado inv[aá]lid/i.test(t)) continue;
       if (/^e\s+o\s+usu[aá]rio\s+(ao|após|antes|quando)\s+/i.test(t)) continue;
@@ -279,7 +285,10 @@ function rigorizarFeatureBdd(feature, ctx = {}) {
         }
         continue;
       }
-      const ev = entaoVerificavel(corpo);
+      const { entaoVerificavelDev } = require('./bdd-gherkin');
+      const ev =
+        (ctx.cenariosTesteDev && entaoVerificavelDev(corpo)) ||
+        entaoVerificavel(corpo);
       if (ev && !fraseEhIncompleta(ev)) {
         out.push(`  Então ${ev}`);
       } else if (entaoFallback) {
