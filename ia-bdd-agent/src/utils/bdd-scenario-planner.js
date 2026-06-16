@@ -394,7 +394,7 @@ function gerarCenariosLacunas(ctx, cenariosExistentes, meta = {}) {
     if (frag.length < 8) continue;
     if (blob.includes(frag.slice(0, 25))) continue;
     const extraLacuna = montarCenarioExtra(
-      `Lacuna — ${v.origem.slice(0, 40)}`,
+      `Lacuna: ${v.origem.slice(0, 40)}`,
       ctx,
       (ctx.passosObjetivos || []).slice(0, 3).join('\n') || ctx.passosFiltrados || ctx.passos,
       fraseEhIncompleta(v.entao) ? null : `  Então ${v.entao}`
@@ -409,7 +409,7 @@ function gerarCenariosLacunas(ctx, cenariosExistentes, meta = {}) {
     if (ev) {
       lacunas.push(
         montarCenarioExtra(
-          'Lacuna — reprodução do defeito reportado',
+          'Lacuna: reprodução do defeito reportado',
           ctx,
           ctx.passosFiltrados || ctx.passos,
           `  Então ${ev}`
@@ -426,7 +426,7 @@ function gerarCenariosLacunas(ctx, cenariosExistentes, meta = {}) {
   ) {
     lacunas.push(
       montarCenarioExtra(
-        'Lacuna — comparar dado entre worklist e portal',
+        'Lacuna: comparar dado entre worklist e portal',
         ctx,
         'localizar o mesmo registro na worklist\nabrir o mesmo registro no portal\ncomparar o campo citado no chamado',
         '  Então o valor exibido é o mesmo entre worklist e portal'
@@ -519,7 +519,7 @@ function montarCabecalhoPlano(ctx, qtdDev, qtdExtra, qtdLacunas, removidos, cena
   const partes = [`${qtdDev} do Dev`];
   if (qtdExtra) partes.push(`${qtdExtra} cobertura`);
   if (qtdLacunas) partes.push(`${qtdLacunas} lacuna(s)`);
-  linhas.push(`# Cenários QA: ${partes.join(' + ')} — ordem por risco/criticidade`);
+  linhas.push(`# Cenários QA: ${partes.join(' + ')}, ordem por risco/criticidade`);
   linhas.push(`# Total: ${total} cenário(s) numerado(s) (1 a ${total})`);
   if (ctx.resumoObjetivo) {
     linhas.push(`# ${ctx.resumoObjetivo}`);

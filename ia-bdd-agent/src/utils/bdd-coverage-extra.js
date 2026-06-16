@@ -186,7 +186,7 @@ function gerarCenariosCoberturaExtra(ctx, blocosDev, nomeFuncionalidade) {
     !devJaCobre(blocosDev, [/smoke/i, /acesso\s+ao\s+ambiente/i, /acesso\s+inicial/i])
   ) {
     const linhasSmoke = montarCenarioExtra(
-      `Cobertura — smoke de acesso (${amb.label})`,
+      `Cobertura: smoke de acesso (${amb.label})`,
       ctx,
       `o usuário acessa a tela principal de ${foco}`,
       entaoExtraAssertivo(
@@ -205,14 +205,14 @@ function gerarCenariosCoberturaExtra(ctx, blocosDev, nomeFuncionalidade) {
   ) {
     if (!devJaCobre(blocosDev, [/compar/i, /sincron/i, /entre\s+.*portal/i])) {
       const linhasInteg = montarCenarioExtra(
-        'Cobertura — consistência entre sistemas',
+        'Cobertura: consistência entre sistemas',
         ctx,
         'registrar o valor exibido no primeiro sistema\nabrir o mesmo registro no segundo sistema\ncomparar o mesmo campo entre os dois ambientes',
         '  Então os dados exibidos são consistentes entre os ambientes consultados'
       );
       if (linhasInteg) {
         candidatos.push({
-          score: pontuarCoberturaExtra('Cobertura — consistência entre sistemas', ctx, t),
+          score: pontuarCoberturaExtra('Cobertura: consistência entre sistemas', ctx, t),
           linhas: linhasInteg,
         });
       }
@@ -225,7 +225,7 @@ function gerarCenariosCoberturaExtra(ctx, blocosDev, nomeFuncionalidade) {
   ) {
     if (/\b(cupom|login|senha|formul[aá]rio|campo\s+obrigat|cupom)\b/i.test(t)) {
       const linhasVal = montarCenarioExtra(
-        'Cobertura — validação com dado inválido',
+        'Cobertura: validação com dado inválido',
         ctx,
         ctx.passosFiltrados || ctx.passos,
         entaoExtraAssertivo(
@@ -235,7 +235,7 @@ function gerarCenariosCoberturaExtra(ctx, blocosDev, nomeFuncionalidade) {
       );
       if (linhasVal) {
         candidatos.push({
-          score: pontuarCoberturaExtra('Cobertura — validação com dado inválido', ctx, t),
+          score: pontuarCoberturaExtra('Cobertura: validação com dado inválido', ctx, t),
           linhas: linhasVal,
         });
       }
@@ -248,14 +248,14 @@ function gerarCenariosCoberturaExtra(ctx, blocosDev, nomeFuncionalidade) {
   ) {
     if (/\b(laud[aá]rio|grava[çc][aã]o|áudio|reprodu)/i.test(t)) {
       const linhasInt = montarCenarioExtra(
-        'Cobertura — interrupção do fluxo',
+        'Cobertura: interrupção do fluxo',
         ctx,
         ctx.passosFiltrados || ctx.passos,
         entaoExtraAssertivo(ctx, '  Então nenhuma mensagem de erro é exibida ao sair do fluxo')
       );
       if (linhasInt) {
         candidatos.push({
-          score: pontuarCoberturaExtra('Cobertura — interrupção do fluxo', ctx, t),
+          score: pontuarCoberturaExtra('Cobertura: interrupção do fluxo', ctx, t),
           linhas: linhasInt,
         });
       }
@@ -265,14 +265,14 @@ function gerarCenariosCoberturaExtra(ctx, blocosDev, nomeFuncionalidade) {
   if (!devJaCobre(blocosDev, [/permiss[aã]o|n[aã]o\s+autorizado|acesso\s+negado/i])) {
     if (/\b(perfil|permiss[aã]o|usu[aá]rio\s+sem)\b/i.test(t)) {
       const linhasPerm = montarCenarioExtra(
-        'Cobertura — usuário sem permissão',
+        'Cobertura: usuário sem permissão',
         ctx,
         'acessar o módulo com usuário de perfil restrito\ntentar executar a ação do chamado',
         '  Então o acesso é bloqueado ou a ação não é permitida conforme regra de perfil'
       );
       if (linhasPerm) {
         candidatos.push({
-          score: pontuarCoberturaExtra('Cobertura — usuário sem permissão', ctx, t),
+          score: pontuarCoberturaExtra('Cobertura: usuário sem permissão', ctx, t),
           linhas: linhasPerm,
         });
       }
@@ -285,14 +285,14 @@ function gerarCenariosCoberturaExtra(ctx, blocosDev, nomeFuncionalidade) {
     !blobDev.includes('lista vazia')
   ) {
     const linhasLista = montarCenarioExtra(
-      'Cobertura — lista sem registros',
+      'Cobertura: lista sem registros',
       ctx,
       'aplicar filtro que não retorna resultados\nvisualizar a área de listagem',
       '  Então é exibido estado vazio ou mensagem informativa sem erro de sistema'
     );
     if (linhasLista) {
       candidatos.push({
-        score: pontuarCoberturaExtra('Cobertura — lista sem registros', ctx, t),
+        score: pontuarCoberturaExtra('Cobertura: lista sem registros', ctx, t),
         linhas: linhasLista,
       });
     }
@@ -309,7 +309,7 @@ function gerarCenariosCoberturaExtra(ctx, blocosDev, nomeFuncionalidade) {
     for (const frase of frases.slice(0, max)) {
       const ev = entaoVerificavelDev(frase.replace(/^deve\s+/i, ''));
       if (!ev || fraseEhIncompleta(ev)) continue;
-      const tituloExtra = `Cobertura — comentário da tarefa`;
+      const tituloExtra = `Cobertura: comentário da tarefa`;
       const linhasCom = montarCenarioExtra(
         tituloExtra,
         ctx,

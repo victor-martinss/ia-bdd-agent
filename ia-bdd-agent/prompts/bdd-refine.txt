@@ -8,9 +8,10 @@ REGRAS ESTRUTURAIS (obrigatório)
 3. PROIBIDO linha `E` depois de `Então` no mesmo cenário — use outro `Então` ou outro cenário.
 4. Cada `Então` deve ser verificável e completo (mensagem exata, valor, estado na tela). Proibido: "Então a mensagem" sem completar.
 5. PROIBIDO juntar critérios com " - " na mesma linha; um `Então` por asserção.
-6. Numere cenários: Cenário 1:, Cenário 2:, … (sequencial).
-7. Máximo 1 Quando + 3 E por cenário; se precisar mais, crie cenário de continuação.
-8. Não invente telas, botões ou textos que não estejam no chamado/evidências.
+6. PROIBIDO traços " - " ou " — " em Funcionalidade e títulos de Cenário; use frase objetiva (vírgula se precisar separar ideias).
+7. Numere cenários: Cenário 1:, Cenário 2:, … (sequencial).
+8. Máximo 1 Quando + 3 E por cenário; se precisar mais, crie cenário de continuação.
+9. Não invente telas, botões ou textos que não estejam no chamado/evidências.
 
 EXEMPLO INVÁLIDO (NÃO FAÇA)
   E cenário: Retornar paciente da fila

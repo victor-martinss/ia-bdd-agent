@@ -78,7 +78,7 @@ function buildStructuredBdd(title, ctx) {
       const blobDev = blocosDev.map((b) => `${b.title || ''}\n${b.body || ''}`).join('\n');
       const defeitoJaNoDev = obtido && new RegExp(obtido.slice(0, 24).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(blobDev);
       if (obtido && !entaoEhVago(obtido) && !defeitoJaNoDev) {
-        const tituloDefeito = `${nomeFuncionalidadeCurto(nomeFuncionalidade)} — defeito observado`;
+        const tituloDefeito = `${nomeFuncionalidadeCurto(nomeFuncionalidade)}, defeito observado`;
         const esperado = ctx.resultadoEsperado
           ? entaoVerificavel(ctx.resultadoEsperado)
           : '';
@@ -89,7 +89,7 @@ function buildStructuredBdd(title, ctx) {
         const partesDefeito =
           chunks.length > 0
             ? chunks.map((passos, idx) => {
-                const suffix = idx > 0 ? ` — continuação` : '';
+                const suffix = idx > 0 ? ' (continuação)' : '';
                 const linhas = [
                   `Cenário: ${tituloDefeito}${suffix}`,
                   ...montarDadosIniciais(ctx),
@@ -154,7 +154,7 @@ function buildStructuredBdd(title, ctx) {
     if (blocosDev.length === 0 && ctx.resultadoObtido && ctx.resultadoEsperado) {
       const { entaoVerificavel, resolverPassosReproducao } = require('../utils/bdd-gherkin');
       const { quandoSubstituto, entaoEhVago } = require('../utils/bdd-rigor');
-      const titulo = `${nomeFuncionalidadeCurto(nomeFuncionalidade)} — defeito observado`;
+      const titulo = `${nomeFuncionalidadeCurto(nomeFuncionalidade)}, defeito observado`;
       const obtido = entaoVerificavel(ctx.resultadoObtido);
       const esperado = entaoVerificavel(ctx.resultadoEsperado);
       if (!obtido || entaoEhVago(obtido)) {
@@ -168,7 +168,7 @@ function buildStructuredBdd(title, ctx) {
         const partes =
           chunks.length > 0
             ? chunks.map((passos, idx) => {
-                const suffix = idx > 0 ? ` — continuação` : '';
+                const suffix = idx > 0 ? ' (continuação)' : '';
                 const linhas = [
                   `Cenário: ${titulo}${suffix}`,
                   ...montarDadosIniciais(ctx),
@@ -302,6 +302,7 @@ function montarInputLlm(title, ctx) {
     '- Cada Então = frase do resultado esperado/obtido ou do Então do bloco Dev (paráfrase curta).',
     '- Cada Quando/E = ação concreta dos passos NGF ou do Dev (abrir laudário, comparar protocolo, etc.).',
     '- PROIBIDO juntar asserções com " - " na mesma linha; use um Então por critério verificável.',
+    '- PROIBIDO traços " - " ou " — " em Funcionalidade e títulos de Cenário; escreva frase objetiva e corrida.',
     '- Gemini analisou imagens/vídeos (se houver); OpenAI sintetiza texto — use ambos sem inventar fatos.'
   );
 

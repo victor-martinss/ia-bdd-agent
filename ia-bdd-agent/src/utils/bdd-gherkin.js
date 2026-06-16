@@ -92,11 +92,37 @@ function passoEhColagemGherkin(texto) {
   return false;
 }
 
+/** Remove traços decorativos em títulos (Funcionalidade/Cenário), mantendo prosa objetiva. */
+function prosaTituloSemTracos(texto) {
+  if (!texto) return '';
+  let t = String(texto);
+  t = t
+    .replace(/\s*[-–—]\s*continua[cç][aã]o/gi, ' (continuação)')
+    .replace(/\s*[-–—]\s*valida[cç][aã]o(\s+principal)?/gi, (_, p) =>
+      p ? ' validação principal' : ' validação'
+    )
+    .replace(/\s*[-–—]\s*defeito\s+observado/gi, ', defeito observado')
+    .replace(/\s*[-–—]\s*respostas\s+diferentes/gi, ', respostas diferentes')
+    .replace(/\s*[-–—]\s*/g, ', ')
+    .replace(/,\s*,+/g, ',')
+    .replace(/^\s*,\s*/, '')
+    .replace(/,\s*$/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  return t;
+}
+
+function sufixoContinuacaoCenario(idx) {
+  return idx > 0 ? ' (continuação)' : '';
+}
+
 /** Título/Funcionalidade/Cenário: só normaliza — nunca trunca. */
 function normalizarTitulo(texto) {
-  return limparMarkdownCru(stripTextoAdministrativo(String(texto || '')))
-    .replace(/\s+/g, ' ')
-    .trim();
+  return prosaTituloSemTracos(
+    limparMarkdownCru(stripTextoAdministrativo(String(texto || '')))
+      .replace(/\s+/g, ' ')
+      .trim()
+  );
 }
 
 /** Truncamento só para corpo de passo (Quando/E/Então), não para títulos. */
@@ -328,8 +354,8 @@ function nomeFuncionalidadeCurto(titulo) {
   const partes = t.split(/\s*[-–—]\s*/).map((p) => p.trim()).filter(Boolean);
   if (partes.length >= 2) {
     const mod = normalizarTitulo(partes[0].replace(/^\[?\s*FEATURE\s*\]?\s*/i, ''));
-    const fluxo = normalizarTitulo(partes.slice(1).join(' — '));
-    return fluxo ? `${mod} — ${fluxo}` : mod;
+    const fluxo = normalizarTitulo(partes.slice(1).join(', '));
+    return fluxo ? `${mod}, ${fluxo}` : mod;
   }
 
   return normalizarTitulo(t);
@@ -915,7 +941,7 @@ function dividirCenarioPorFasesAmbiente(tituloBase, linhasCorpo, opts = {}) {
 
     if (!textos.length) {
       blocos.push({
-        titulo: `${tituloBase} — ${faseLabel}`,
+        titulo: normalizarTitulo(`${tituloBase}, ${faseLabel}`),
         corpo: [...prefixoDado, '  Quando o usuário executa o fluxo descrito no chamado'],
         fase: faseLabel,
         parte: f + 1,
@@ -932,9 +958,9 @@ function dividirCenarioPorFasesAmbiente(tituloBase, linhasCorpo, opts = {}) {
       const acaoGherkin = acoesParaLinhasGherkin(resumidas);
       const parteFluxo = Math.floor(i / janela) + 1;
       const suffixCont =
-        textos.length > janela && parteFluxo > 1 ? ' — continuação' : '';
+        textos.length > janela && parteFluxo > 1 ? ' (continuação)' : '';
       blocos.push({
-        titulo: `${tituloBase} — ${faseLabel}${suffixCont}`,
+        titulo: normalizarTitulo(`${tituloBase}, ${faseLabel}${suffixCont}`),
         corpo: [...(i === 0 ? prefixoDado : [dadoContinuacaoFluxo()]), ...acaoGherkin],
         fase: faseLabel,
         parte: blocos.length + 1,
@@ -999,7 +1025,7 @@ function dividirCenarioPorTotalPassos(tituloBase, dado, acao, entoes, mas, opts 
   }
 
   return partes.map((acaoPart, idx) => {
-    const suffix = idx > 0 ? ' — continuação' : '';
+    const suffix = sufixoContinuacaoCenario(idx);
     const prefixo =
       idx === 0
         ? dado.length
@@ -1154,7 +1180,7 @@ function dividirCenarioCompletoPorMaxE(tituloBase, linhasCorpo, opts = {}) {
   }
 
   return partesAcao.map((acaoPart, idx) => {
-    const suffix = idx > 0 ? ' — continuação' : '';
+    const suffix = sufixoContinuacaoCenario(idx);
     const dadoAmb = primeiraLinhaDado(dado);
     const prefixo = idx === 0 ? (dadoAmb ? [dadoAmb] : []) : [dadoContinuacaoFluxo()];
     const corpo = [...prefixo, ...acaoPart];
@@ -1508,15 +1534,15 @@ function parseCenariosDevMarkdown(bruto) {
       for (const { quando, entao, sufixo } of corpos) {
         if (!entao) continue;
         const tituloCurto = sufixo
-          ? normalizarTitulo(`${tituloBase} — ${sufixo}`)
+          ? normalizarTitulo(`${tituloBase}, ${sufixo}`)
           : normalizarTitulo(tituloBase);
         const qLine = String(quando || '').replace(/^\s+/, '').trim();
         const eLine = String(entao || '').replace(/^\s+/, '').trim();
         const corpo = `${qLine}\n${eLine}`;
         blocos.push(
           parseDevChunk(
-            `Cenário: ${sectionTitle} — ${tituloCurto}\n${corpo}`,
-            `${sectionTitle} — ${tituloCurto}`
+            `Cenário: ${sectionTitle}, ${tituloCurto}\n${corpo}`,
+            `${sectionTitle}, ${tituloCurto}`
           )
         );
       }
@@ -2255,7 +2281,7 @@ function tituloCenarioDevLista(titulo) {
   const m = t.match(/^realizar\s+(?:a|o)\s+(.+?),\s*ap[oó]s/i);
   if (m) {
     const acao = m[1].replace(/\s+com\s+configura[cç][aã]o.+$/i, '').trim();
-    return tituloCenarioCurto(`${acao} — respostas diferentes após alterar configuração`);
+    return tituloCenarioCurto(`${acao}, respostas diferentes após alterar configuração`);
   }
   return tituloCenarioCurto(t);
 }
@@ -2273,7 +2299,7 @@ function cenariosQaAPartirDoDev(bloco, ctx, nomeFuncionalidade) {
       : tituloBruto.length > 96
         ? tituloCenarioCurto(tituloBruto)
         : tituloBruto
-    : `${nomeFuncionalidadeCurto(nomeFuncionalidade)} — validação`;
+    : `${nomeFuncionalidadeCurto(nomeFuncionalidade)} validação`;
   const refDev = bloco.title || null;
   const textoDev = textoBlocoDev(bloco);
 
@@ -2372,7 +2398,7 @@ function cenariosQaAPartirDoDev(bloco, ctx, nomeFuncionalidade) {
   }
 
   return chunks.flatMap((passos, idx) => {
-    const suffix = idx > 0 ? ` — continuação` : '';
+    const suffix = sufixoContinuacaoCenario(idx);
     const corpo = [...montarDadosIniciais(ctx), ...passos];
     if (idx === chunks.length - 1) corpo.push(entao);
     return dividirCenarioCompletoPorMaxE(`${titulo}${suffix}`, corpo, {
@@ -2425,7 +2451,7 @@ function entaoDoContexto(ctx, textoDevFallback = '') {
  */
 function cenariosPrincipalNgf(ctx, nomeFuncionalidade) {
   const nomeCurto = nomeFuncionalidadeCurto(nomeFuncionalidade);
-  const titulo = `${nomeCurto} — validação principal`;
+  const titulo = `${nomeCurto} validação principal`;
   const entao = entaoDoContexto(ctx);
   if (!entao) return [];
   const chunks = passosParaStepsGherkinComContinuacao(resolverPassosReproducao(ctx));
@@ -2442,7 +2468,7 @@ function cenariosPrincipalNgf(ctx, nomeFuncionalidade) {
   }
 
   return chunks.map((passos, idx) => {
-    const suffix = idx > 0 ? ` — continuação` : '';
+    const suffix = sufixoContinuacaoCenario(idx);
     const linhas = [`Cenário: ${titulo}${suffix}`, ...montarDadosIniciais(ctx), ...passos];
     if (idx === chunks.length - 1) linhas.push(entao);
     return linhas;
@@ -2579,7 +2605,7 @@ function fluxoPrincipalDoTitulo(titulo) {
     /^(sustenta[çc][aã]o|desenvolvimento(\s+web|\s+desktop)?|portal(\s+mobilemed)?|mobile(\s+i)?|squad|feature|improve(?:ment)?|fix|bug|\s*x\s*)$/i;
   while (partes.length > 1 && skip.test(partes[0])) partes.shift();
   if (partes.length > 1 && /^portal\s+mobilemed(?:\s+improve)?$/i.test(partes[0])) partes.shift();
-  let fluxo = partes.join(' — ') || t;
+  let fluxo = partes.join(', ') || t;
   fluxo = fluxo
     .replace(/^portal\s+mobilemed(?:\s+improve)?\s*[-–—]?\s*/i, '')
     .replace(/^improve\s*[-–—]\s*/i, '')
@@ -2623,7 +2649,7 @@ function parseTituloParaCenario(titulo) {
     const alvo = m[1].trim();
     const acao = m[2].trim();
     return {
-      titulo: `${alvo} — validação ao ${acao}`,
+      titulo: `${alvo} validação ao ${acao}`,
       e: `o usuário acessa a tela citada no chamado`,
       quando: `o usuário ${acao.charAt(0).toLowerCase()}${acao.slice(1)}`,
       entao: `${alvo} não é exigido como obrigatório`,
@@ -2811,8 +2837,14 @@ function sanitizarFeatureBdd(feature) {
     }
 
     const { isLinhaCenario } = require('./bdd-scenario-numbering');
-    if (/^funcionalidade\s*:/i.test(trimmed) || isLinhaCenario(trimmed)) {
-      out.push(trimmed);
+    if (/^funcionalidade\s*:/i.test(trimmed)) {
+      const m = trimmed.match(/^(\s*funcionalidade\s*:\s*)(.*)$/i);
+      out.push(m ? m[1] + prosaTituloSemTracos(m[2]) : trimmed);
+      continue;
+    }
+    if (isLinhaCenario(trimmed)) {
+      const m = trimmed.match(/^(\s*cen[aá]rio\s*(?:\d+\s*)?:\s*)(.*)$/i);
+      out.push(m ? m[1] + prosaTituloSemTracos(m[2]) : trimmed);
       continue;
     }
 
@@ -2842,7 +2874,8 @@ function sanitizarFeatureBdd(feature) {
     }
 
     if (trimmed.startsWith('#')) {
-      out.push(trimmed);
+      const m = trimmed.match(/^(\s*#\s*)(.*)$/);
+      out.push(m ? m[1] + prosaTituloSemTracos(m[2]) : trimmed);
       continue;
     }
 
@@ -2909,6 +2942,8 @@ module.exports = {
   extrairPassosListaDevDoTitulo,
   tituloCenarioDevLista,
   resolverPassosReproducao,
+  prosaTituloSemTracos,
+  sufixoContinuacaoCenario,
   sanitizarFeatureBdd,
   aplicarLimiteEPorCenarioNaFeature,
   garantirUmEntaoPorCenario,
