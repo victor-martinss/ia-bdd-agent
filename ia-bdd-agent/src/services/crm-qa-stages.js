@@ -391,8 +391,13 @@ function isStageInList(stageId, stageIds) {
 }
 
 async function isQaStageId(stageId, entityTypeIdNum) {
+  if (!stageId) return false;
+  const sid = String(stageId);
   const qa = await resolveQaStageIds(entityTypeIdNum);
-  return isStageInList(stageId, qa);
+  if (isStageInList(sid, qa)) return true;
+  if (await isNovoTesteStageId(sid, entityTypeIdNum)) return true;
+  const name = await stageDisplayName(sid, entityTypeIdNum);
+  return looksLikeQaStageName(name, devStageNameNeedles());
 }
 
 async function isDevStageId(stageId, entityTypeIdNum) {

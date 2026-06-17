@@ -275,20 +275,51 @@ async function buildItemListFilter(entityTypeIdNum) {
     return fromEnv;
   }
 
-  const { resolveQaStageIds, qaStageNameNeedles, buildStageFilter } = require('./crm-qa-stages');
-  const matched = await resolveQaStageIds(entityTypeIdNum);
+  const {
+    resolveQaStageIds,
+    resolveNovoTesteStageIds,
+    resolveAllStagesDetailed,
+    qaStageNameNeedles,
+    novoTesteStageNameNeedles,
+    buildStageFilter,
+  } = require('./crm-qa-stages');
+  const { pollOnlyNovoTesteEnabled } = require('../utils/bdd-poll-rules');
+
+  const onlyNovoTeste =
+    pollOnlyNovoTesteEnabled() && process.env.BITRIX_POLL_SCAN_ALL_QA_STAGES !== '1';
+
+  let postFilterNovoTeste = false;
+  let matched;
+  if (onlyNovoTeste) {
+    await resolveAllStagesDetailed(entityTypeIdNum);
+    matched = await resolveNovoTesteStageIds(entityTypeIdNum);
+    if (!matched.length) {
+      console.warn(
+        `[Bitrix] SPA ${entityTypeIdNum}: colunas Novo Teste não resolvidas — fallback fila QA ampla com filtro em memória`
+      );
+      matched = await resolveQaStageIds(entityTypeIdNum);
+      postFilterNovoTeste = matched.length > 0;
+    }
+  } else {
+    matched = await resolveQaStageIds(entityTypeIdNum);
+  }
 
   if (!matched.length) {
     console.warn(
-      `[Bitrix] Nenhuma coluna QA encontrada para: ${qaStageNameNeedles().join(', ')}. Ajuste BITRIX_QA_STAGE_NAMES ou BITRIX_STAGE_NAME.`
+      `[Bitrix] Nenhuma coluna QA encontrada para: ${(onlyNovoTeste ? novoTesteStageNameNeedles() : qaStageNameNeedles()).join(', ')}. Ajuste BITRIX_QA_STAGE_NAMES ou BITRIX_STAGE_NAME.`
     );
     return {};
   }
 
-  console.log(
-    `[Bitrix] Fila QA (${qaStageNameNeedles().join(', ')}) → ${matched.length} estágio(s)`
-  );
-  return { __qaStageIds: matched, ...buildStageFilter(matched) };
+  const label = onlyNovoTeste
+    ? `Novo Teste (${novoTesteStageNameNeedles().join(', ')})`
+    : qaStageNameNeedles().join(', ');
+  console.log(`[Bitrix] Fila QA (${label}) → ${matched.length} estágio(s)`);
+  return {
+    __qaStageIds: matched,
+    __postFilterNovoTeste: postFilterNovoTeste,
+    ...buildStageFilter(matched),
+  };
 }
 
 /**
@@ -344,13 +375,26 @@ async function attachPipelineLabels(etId, items) {
   }));
 }
 
+async function filterQueueItemsNovoTeste(etId, items, postFilter) {
+  if (!postFilter || !items.length) return items;
+  const { isNovoTesteStageId } = require('./crm-qa-stages');
+  const out = [];
+  for (const it of items) {
+    const sid = String(it._stageId || it.stageId || '');
+    if (sid && (await isNovoTesteStageId(sid, etId))) out.push(it);
+  }
+  return out;
+}
+
 async function fetchQaQueueItemsForEntityType(etId) {
   const filter = await buildItemListFilter(etId);
   const limit = listPageSize();
 
   const qaStageIds = filter && filter.__qaStageIds;
+  const postFilterNovoTeste = Boolean(filter && filter.__postFilterNovoTeste);
   const cleanFilter = filter ? { ...filter } : {};
   delete cleanFilter.__qaStageIds;
+  delete cleanFilter.__postFilterNovoTeste;
 
   const normalize = (it) => {
     const id = it.id ?? it.ID;
@@ -390,7 +434,8 @@ async function fetchQaQueueItemsForEntityType(etId) {
         }
       }
     }
-    return attachPipelineLabels(etId, [...byKey.values()]);
+    const rows = await filterQueueItemsNovoTeste(etId, [...byKey.values()], postFilterNovoTeste);
+    return attachPipelineLabels(etId, rows);
   }
 
   const allItems = [];
@@ -413,7 +458,8 @@ async function fetchQaQueueItemsForEntityType(etId) {
     if (start > 200000) break;
   }
 
-  return attachPipelineLabels(etId, allItems);
+  const rows = await filterQueueItemsNovoTeste(etId, allItems, postFilterNovoTeste);
+  return attachPipelineLabels(etId, rows);
 }
 
 async function getTasks() {

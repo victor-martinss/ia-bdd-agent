@@ -185,10 +185,14 @@ async function runBitrixBddCycle(packageRoot, options = {}) {
           (classification.action === 'generate' || classification.action === 'merge'),
       });
 
+      const veioFilaQaElegivel = veioFilaQa && eligibility && eligibility.proceed !== false;
       if (
         podeGravarCrm &&
         gravarNoCardPrincipal &&
-        (inQa || forcarGravacaoCrm || process.env.BITRIX_PUSH_BDD_ON_DEV_CARD === '1')
+        (inQa ||
+          forcarGravacaoCrm ||
+          veioFilaQaElegivel ||
+          process.env.BITRIX_PUSH_BDD_ON_DEV_CARD === '1')
       ) {
         if (!inQa && forcarGravacaoCrm && !quiet && stageId) {
           console.log(
