@@ -132,6 +132,20 @@ function quandoParaBlocoDev(bloco, ctx) {
   const qa = quandoAPartirDeAssertivoDev(bloco);
   if (qa) return qa;
 
+  const body = limparTexto(bloco?.body || '');
+  if (body && /(?:testar|validar)\s+/i.test(body)) {
+    const mParen = body.match(/\(([^)]+)\)/);
+    if (mParen && mParen[1].includes('|')) {
+      const fluxo = mParen[1].split(/\|/)[0].trim();
+      if (fluxo.length > 10) {
+        const qw = passoGherkin('Quando', `o usuário ${fluxo}`);
+        if (qw && !passoEhVago(qw)) return qw;
+      }
+    }
+    const qw = passoGherkin('Quando', 'o usuário executa os fluxos descritos no cenário Dev');
+    if (qw && !passoEhVago(qw)) return qw;
+  }
+
   const mDesc = String(bloco?.body || '').match(/descri[cç][ãa]o\s*:\s*(.+?)(?:\n|resultado\s+esperado\s*:|$)/is);
   if (mDesc) {
     const mAo = mDesc[1].match(/^(?:dado|given)\s+(.+)$/i);

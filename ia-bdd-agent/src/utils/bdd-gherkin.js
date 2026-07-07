@@ -1379,6 +1379,21 @@ function parseCenariosDevBlocos(texto) {
   const condUnico = parseDevChunkDadoCondicional(bruto);
   if (condUnico) return [condUnico];
 
+  const mParenFluxos = bruto.match(/\(([^)]+)\)/);
+  if (mParenFluxos && mParenFluxos[1].includes('|')) {
+    const prefix = bruto.slice(0, mParenFluxos.index);
+    const suffix = bruto.slice((mParenFluxos.index || 0) + mParenFluxos[0].length);
+    const fluxos = mParenFluxos[1]
+      .split(/\|/)
+      .map((f) => f.trim())
+      .filter((f) => f.length > 8);
+    if (fluxos.length > 1) {
+      return fluxos.map((fluxo) =>
+        parseDevChunk(`${prefix}${fluxo}${suffix}`, fluxo.slice(0, 96))
+      );
+    }
+  }
+
   return [parseDevChunk(bruto, null)];
 }
 

@@ -143,7 +143,23 @@ async function runBitrixBddCycle(packageRoot, options = {}) {
       const stageId = detail && (detail.stageId || detail.STAGE_ID);
       const inQa = stageId ? await isQaStageId(String(stageId), etId) : true;
       const inDev = stageId ? await isDevStageId(String(stageId), etId) : false;
-      publicavel = bddPodePublicarNoCrm(bdd);
+      const canonical = resolveCanonicalBddForLinked(detail, bdd);
+      const bddCrm = bddPodePublicarNoCrm(bdd)
+        ? bdd
+        : bddPodePublicarNoCrm(canonical.bdd)
+          ? canonical.bdd
+          : bdd;
+      publicavel = bddPodePublicarNoCrm(bddCrm);
+      if (
+        !quiet &&
+        bddCrm !== bdd &&
+        publicavel &&
+        canonical.source !== 'gerado'
+      ) {
+        console.log(
+          `[CRM] item ${task.id}: BDD gerado vazio/inválido — gravando canônico (${canonical.nCanonical} cenário(s), ${canonical.source})`
+        );
+      }
       const veioFilaQa = Boolean(task._queueKey);
       const forcarGravacaoCrm =
         task._forceCrmPush === true ||
@@ -181,7 +197,7 @@ async function runBitrixBddCycle(packageRoot, options = {}) {
       const targets = await discoverBddLinkedTargets(task.id, detail);
       const gravarNoCardPrincipal = shouldPushBddToMainCard(targets, {
         forceMainCard:
-          Boolean(task._queueKey) &&
+          (Boolean(task._queueKey) || task._forceCrmPush === true) &&
           (classification.action === 'generate' || classification.action === 'merge'),
       });
 
@@ -199,7 +215,7 @@ async function runBitrixBddCycle(packageRoot, options = {}) {
             `[CRM] item ${task.id}: estágio "${stageId}" — gravando mesmo assim (fila QA / merge / forçado).`
           );
         }
-        const crmResult = await pushBddToCrmCenariosQa(task.id, bdd, {
+        const crmResult = await pushBddToCrmCenariosQa(task.id, bddCrm, {
           quiet,
           detail,
           entityTypeId: etId,
@@ -237,8 +253,7 @@ async function runBitrixBddCycle(packageRoot, options = {}) {
         crm.skipped += 1;
       }
 
-      const canonical = resolveCanonicalBddForLinked(detail, bdd);
-      const bddAtrelados = canonical.bdd;
+      const bddAtrelados = bddPodePublicarNoCrm(bddCrm) ? bddCrm : canonical.bdd;
       if (
         !quiet &&
         targets.hasLinkedDestinations &&

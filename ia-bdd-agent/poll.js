@@ -79,17 +79,38 @@ function pollItemDelayMs() {
   return Number.isFinite(n) && n >= 0 ? n : 600;
 }
 
-/** Novos na fila e BDD_POLL_FORCE_IDS processam primeiro (fila grande + Bitrix lento). */
+/** Novos na fila, SPA 1294 e BDD_POLL_FORCE_IDS processam primeiro. */
+function pollQueueEntityPriority(et) {
+  const raw = (process.env.BDD_POLL_QUEUE_ENTITY_PRIORITY || '1294,1276').trim();
+  const order = raw
+    .split(/[,;\s]+/)
+    .map((s) => Number.parseInt(s.trim(), 10))
+    .filter((n) => Number.isFinite(n) && n > 0);
+  const idx = order.indexOf(Number(et));
+  return idx >= 0 ? idx : order.length;
+}
+
 function prioritizeQueueTasks(tasks, newInQueueSet, forceSet) {
-  if (process.env.BDD_POLL_PRIORITY_NEW === '0') return tasks;
+  if (process.env.BDD_POLL_PRIORITY_NEW === '0') {
+    return [...tasks].sort(
+      (a, b) =>
+        pollQueueEntityPriority(a._entityTypeId) - pollQueueEntityPriority(b._entityTypeId)
+    );
+  }
   const rank = (t) => {
     const id = normId(t.id);
     const key = taskQueueKey(t);
+    const etPri = pollQueueEntityPriority(t._entityTypeId);
     if (forceSet.has(id)) return 0;
-    if (newInQueueSet.has(key)) return 1;
-    return 2;
+    if (newInQueueSet.has(key)) return 10 + etPri;
+    return 100 + etPri;
   };
-  return [...tasks].sort((a, b) => rank(a) - rank(b));
+  return [...tasks].sort((a, b) => {
+    const ra = rank(a);
+    const rb = rank(b);
+    if (ra !== rb) return ra - rb;
+    return Number(b.id) - Number(a.id);
+  });
 }
 
 function queueDelta(currentTasks, prevQueueIds, hasBaseline) {

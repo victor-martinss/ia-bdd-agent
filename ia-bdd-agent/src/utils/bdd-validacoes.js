@@ -300,6 +300,19 @@ function entaoAssertivoDoContexto(ctx, textoDevFallback = '') {
     if (entao && !entaoEhVago(entao)) return `  Então ${entao}`;
   }
 
+  if (limparTexto(ctx.descricao) && corpoBloco && /validar|testar/i.test(corpoBloco)) {
+    const desc = limparTexto(ctx.descricao);
+    const limites = [];
+    const mEx = desc.match(/imagens?\s+do\s+exame[^/]*?(\d+\s*MB)/i);
+    const mOut = desc.match(/outros?\s+anexos[^.]*?(\d+\s*MB)/i);
+    if (mEx) limites.push(`imagens do exame até ${mEx[1]}`);
+    if (mOut) limites.push(`outros anexos até ${mOut[1]}`);
+    if (limites.length) {
+      const compact = /compacta/i.test(desc) ? ' e compactação de imagens' : '';
+      return `  Então os anexos devem respeitar os limites (${limites.join('; ')})${compact}`;
+    }
+  }
+
   return null;
 }
 

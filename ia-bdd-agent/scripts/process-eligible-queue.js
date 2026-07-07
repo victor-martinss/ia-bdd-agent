@@ -16,6 +16,8 @@ const { resolveAllStagesDetailed } = require('../src/services/crm-qa-stages');
 const { runBitrixBddCycle } = require('../src/orchestrator/run-bitrix-bdd-cycle');
 
 const dryRun = process.argv.includes('--dry-run');
+const spaArg = process.argv.find((a) => /^\d{4}$/.test(a));
+const spaFilter = spaArg ? Number.parseInt(spaArg, 10) : null;
 
 async function warmupStages() {
   for (const et of [1276, 1294, 1272]) {
@@ -47,7 +49,13 @@ async function main() {
   }
 
   const elegiveis = [];
-  for (const task of tasks) {
+  const tasksFiltered = spaFilter
+    ? tasks.filter((t) => Number(t._entityTypeId) === spaFilter)
+    : tasks;
+  if (spaFilter) {
+    console.log(`Filtro SPA ${spaFilter}: ${tasksFiltered.length} card(s) de ${tasks.length}`);
+  }
+  for (const task of tasksFiltered) {
     const id = Number(task.id);
     const et = task._entityTypeId;
     let detail;
