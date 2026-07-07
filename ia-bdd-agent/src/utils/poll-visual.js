@@ -42,11 +42,14 @@ function line(char = '─', width = 58) {
 
 /**
  * @param {{ id: string|number, title?: string, classification: { action: string, reason?: string, fieldKey?: string|null } }} row
+ * @param {{ proceed?: boolean, code?: string, reason?: string } | null} [eligibilityPreview]
  */
-function printNewInQueueAlert(row) {
+function printNewInQueueAlert(row, eligibilityPreview = null) {
   const { id, title, classification } = row;
   const titulo = (title || 'sem título').slice(0, 52);
   const ts = logTimestampBr();
+  const blocked =
+    eligibilityPreview && eligibilityPreview.proceed === false;
 
   console.log('');
   console.log(paint(c.cyan, line('═')));
@@ -65,7 +68,15 @@ function printNewInQueueAlert(row) {
     console.log(paint(c.dim, `   SPA entityTypeId=${row.entityTypeId}`));
   }
 
-  if (classification.action === 'generate') {
+  if (blocked) {
+    const code = eligibilityPreview.code ? ` [${eligibilityPreview.code}]` : '';
+    console.log(
+      paint(c.yellow + c.bold, `   ⊘ Aguardando regra${code} — não grava agora`)
+    );
+    if (eligibilityPreview.reason) {
+      console.log(paint(c.dim, `     ${eligibilityPreview.reason}`));
+    }
+  } else if (classification.action === 'generate') {
     console.log(
       paint(c.green + c.bold, '   ▶ SEM cenários QA — gerando BDD agora…')
     );

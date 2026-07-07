@@ -285,16 +285,17 @@ async function resolveNovoTesteStageIds(entityTypeIdNum) {
   if (novoTesteStageIdsCache.has(entityTypeIdNum)) {
     return novoTesteStageIdsCache.get(entityTypeIdNum);
   }
-  const needles = novoTesteStageNameNeedles();
-  const detailed = await resolveQaStagesDetailed(entityTypeIdNum);
+  const detailed = await resolveAllStagesDetailed(entityTypeIdNum);
   const ids = [
     ...new Set(
       detailed
-        .filter((r) => stageNameMatchesNeedles(r.stageName, needles))
+        .filter((r) => looksLikeNovoTesteStageId(r.stageId, r.stageName))
         .map((r) => r.stageId)
     ),
   ];
-  novoTesteStageIdsCache.set(entityTypeIdNum, ids);
+  if (ids.length || detailed.length > 0) {
+    novoTesteStageIdsCache.set(entityTypeIdNum, ids);
+  }
   for (const r of detailed) {
     stageNameByIdCache.set(`${entityTypeIdNum}:${r.stageId}`, r.stageName);
   }

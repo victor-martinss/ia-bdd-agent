@@ -160,7 +160,15 @@ async function scanAndProcessQaQueue(tasks, forceSet, newInQueueSet, onProgress,
     }
 
     if (isNewInQueue || forceSet.has(id)) {
-      printNewInQueueAlert(row);
+      let eligibilityPreview = null;
+      if (!forceSet.has(id) && (classification.action === 'generate' || classification.action === 'merge')) {
+        try {
+          eligibilityPreview = await evaluateBddPollEligibility(id, detail);
+        } catch {
+          eligibilityPreview = null;
+        }
+      }
+      printNewInQueueAlert(row, eligibilityPreview);
     }
 
     if (classification.action === 'generate') {
@@ -235,6 +243,7 @@ async function scanAndProcessQaQueue(tasks, forceSet, newInQueueSet, onProgress,
             _prefetchedDetail: detail,
             _classification: classification,
             _pollEligibility: eligibility,
+            _queueKey: task._queueKey,
           },
         ],
         quiet: false,

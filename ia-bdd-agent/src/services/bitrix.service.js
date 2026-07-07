@@ -305,10 +305,12 @@ async function buildItemListFilter(entityTypeIdNum) {
   }
 
   if (!matched.length) {
-    console.warn(
-      `[Bitrix] Nenhuma coluna QA encontrada para: ${(onlyNovoTeste ? novoTesteStageNameNeedles() : qaStageNameNeedles()).join(', ')}. Ajuste BITRIX_QA_STAGE_NAMES ou BITRIX_STAGE_NAME.`
+    const warnLabel = (onlyNovoTeste ? novoTesteStageNameNeedles() : qaStageNameNeedles()).join(
+      ', '
     );
-    return {};
+    throw new Error(
+      `SPA ${entityTypeIdNum}: colunas QA não resolvidas (${warnLabel}) — fila não consultada para evitar cards fora de Novo Teste`
+    );
   }
 
   const label = onlyNovoTeste
@@ -471,10 +473,20 @@ async function getTasks() {
   const byKey = new Map();
 
   for (const etId of entityIds) {
-    const batch = await fetchQaQueueItemsForEntityType(etId);
-    for (const row of batch) {
-      byKey.set(row._queueKey, row);
+    try {
+      const batch = await fetchQaQueueItemsForEntityType(etId);
+      for (const row of batch) {
+        byKey.set(row._queueKey, row);
+      }
+    } catch (e) {
+      console.warn(
+        `[Bitrix] SPA ${etId}: fila QA ignorada neste ciclo — ${e.message || e}`
+      );
     }
+  }
+
+  if (!byKey.size) {
+    throw new Error('Nenhum card na fila QA (todos os SPAs falharam ou estágios não resolvidos)');
   }
 
   if (entityIds.length > 1) {
