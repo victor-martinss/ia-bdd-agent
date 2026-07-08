@@ -1291,6 +1291,21 @@ function parseCenariosDevBlocos(texto) {
     .trim();
   if (!limparTexto(bruto)) return [];
 
+  // "Cenário 1) / Cenário 01 / Cenário 1:" + Descrição + Resultado( Esperado)
+  if (
+    /(?:cenário|cenario)\s*\d+/i.test(bruto) &&
+    /descri[cç][ãa]o\s*:/i.test(bruto) &&
+    /resultado\s*(?:esperado\s*)?:/i.test(bruto)
+  ) {
+    const porDescRes = bruto
+      .split(/(?=(?:cenário|cenario)\s*\d+\s*[):]?\s*)/i)
+      .map((c) => c.replace(/^\s*---+\s*/g, '').trim())
+      .filter((c) => limparTexto(c));
+    if (porDescRes.length >= 1) {
+      return porDescRes.map((chunk) => parseDevChunkDescricaoResultado(chunk));
+    }
+  }
+
   // "Cenário 1) Descrição: … Resultado Esperado: …" (parêntese — comum no SPA Feature 1272)
   if (/(?:cenário|cenario)\s*\d+\s*\)/i.test(bruto)) {
     const porParen = bruto
@@ -2015,13 +2030,14 @@ function extrairQuandoEntaoDoCorpo(body) {
  */
 function parseDevChunkDescricaoResultado(chunk) {
   let bruto = String(chunk || '').trim();
-  const mHeader = bruto.match(/^(?:cenário|cenario)\s*(\d+)\s*\)\s*/i);
+  // Cenário 1) | Cenário 01 | Cenário 1:
+  const mHeader = bruto.match(/^(?:cenário|cenario)\s*(\d+)\s*[):]?\s*/i);
   const num = mHeader ? mHeader[1] : null;
   if (mHeader) bruto = bruto.slice(mHeader[0].length).trim();
 
   const blob = bruto.replace(/\r?\n/g, ' ').trim();
   const mInline = blob.match(
-    /descri[cç][ãa]o\s*:\s*(.+?)\s+resultado\s+esperado\s*:\s*(.+)$/is
+    /descri[cç][ãa]o\s*:\s*(.+?)\s+resultado\s*(?:esperado\s*)?:\s*(.+)$/is
   );
   if (mInline) {
     const descricao = limparMarkdownCru(mInline[1]).trim();
@@ -2040,7 +2056,8 @@ function parseDevChunkDescricaoResultado(chunk) {
       descricao = limparMarkdownCru(md[1]).trim();
       continue;
     }
-    const mr = line.match(/^resultado\s+esperado\s*:\s*(.*)$/i);
+    // Aceita "Resultado:" e "Resultado Esperado:"
+    const mr = line.match(/^resultado\s*(?:esperado\s*)?:\s*(.*)$/i);
     if (mr) {
       resultado = limparMarkdownCru(mr[1]).trim();
       continue;
@@ -2382,12 +2399,12 @@ function cenariosQaAPartirDoDev(bloco, ctx, nomeFuncionalidade) {
   const formatoGwtDev = corpoTemFormatoGwtDev(bloco.body || '');
   const formatoDevEstruturado =
     formatoGwtDev ||
-    /descri[cç][ãa]o\s*:|resultado\s+esperado\s*:/i.test(bloco.body || '');
+    /descri[cç][ãa]o\s*:|resultado\s*(?:esperado\s*)?:/i.test(bloco.body || '');
 
   if (passosCorpo.entao || passosCorpo.entaoList?.length) {
     const { quandoParaBlocoDev } = require('./bdd-rigor');
     const soAssertivo =
-      /^resultado\s+esperado\s*:/im.test(bloco.body || '') &&
+      /^resultado\s*(?:esperado\s*)?:/im.test(bloco.body || '') &&
       !/descri[cç][ãa]o\s*:/i.test(bloco.body || '');
     const quando =
       passosCorpo.quando ||

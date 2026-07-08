@@ -83,7 +83,9 @@ function entaoParaBlocoDev(ctx, corpoBloco) {
     formatarEntaoDevResultado,
   } = require('./bdd-validacoes');
 
-  const mRes = String(corpoBloco || '').match(/resultado\s+esperado\s*:\s*(.+)$/is);
+  const mRes = String(corpoBloco || '').match(
+    /resultado\s*(?:esperado\s*)?:\s*(.+)$/is
+  );
   if (mRes) {
     const frases = splitResultadoDevEmAssercoes(mRes[1])
       .map((f) => formatarEntaoDevResultado(f))
