@@ -487,7 +487,14 @@ function gerarCenariosFaltantesDoDev(ctx, existentes) {
   for (const bloco of blocos) {
     const refDev = bloco.title || '';
     const jaCoberto =
-      existentes.some((c) => cenarioEspelhaDev(c, ctx) && similaridade(refDev, c.titulo) > 0.55) ||
+      existentes.some((c) => similaridade(refDev, c.titulo) > 0.55) ||
+      existentes.some((c) => {
+        if (!refDev) return false;
+        const { normalizarTitulo } = require('./bdd-gherkin');
+        const a = normalizarTitulo(refDev).toLowerCase();
+        const b = normalizarTitulo(c.titulo || '').toLowerCase();
+        return Boolean(a && b && (a === b || a.includes(b) || b.includes(a)));
+      }) ||
       existentes.some(
         (c) =>
           refDev &&

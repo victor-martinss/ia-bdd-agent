@@ -113,7 +113,12 @@ function passoEhColagemGherkin(texto) {
     if (!fraseCompleta) return true;
   }
   if (passoEhColagemDescricao(t)) return true;
-  if (fraseEhIncompleta(t)) return true;
+  // Não usa fraseEhIncompleta aqui: ela exige "deve/ser" (regra de Então)
+  // e marcava Quando imperativos curtos ("abre o exame") como colados.
+  const corpo = limparTexto(t.replace(/^o\s+usu[aá]rio\s+/i, ''));
+  if (!corpo || corpo.length < 8) return true;
+  if (/…|\.\.\./.test(corpo)) return true;
+  if (TERMINACOES_INCOMPLETAS.test(corpo)) return true;
   return false;
 }
 
@@ -2343,13 +2348,67 @@ function textoBlocoDev(bloco) {
 /** Imperativo no título Dev: "Realizar …", "Tentar …", "Validar …". */
 function quandoAPartirDeTituloDev(titulo) {
   const t = normalizarTitulo(String(titulo || ''));
+  const mNaFerramenta = t.match(/^na\s+ferramenta\s+([^,]+),\s*(.+)$/i);
+  if (mNaFerramenta) {
+    let acao = mNaFerramenta[2].trim();
+    const ferr = mNaFerramenta[1].trim();
+    acao = acao
+      .replace(/^fazer\s+(?:o\s+)?/i, '')
+      .replace(/^delet(?:ar)?\s+(?:da\s+)?/i, 'remove a ')
+      .replace(/\s+clicando\s+no\s+atalho\s+delete\s+no\s+teclado/i, ' usando a tecla Delete');
+    const frase = objetivarFrase(`${acao} na ferramenta ${ferr}`) || `${acao} na ferramenta ${ferr}`;
+    return passoGherkin('Quando', `o usuário ${frase}`);
+  }
   const m = t.match(
-    /^(realizar|tentar|selecionar|validar|acessar|abrir|enviar|registrar|visualizar|clicar|aplicar|informar|configurar|alterar)\s+(.+)$/i
+    /^(realizar|tentar|selecionar|validar|acessar|abrir|enviar|registrar|visualizar|clicar|aplicar|informar|configurar|alterar|fazer)\s+(.+)$/i
   );
   if (!m) return null;
-  const verbo = m[1].toLowerCase();
-  const resto = m[2].trim();
-  return passoGherkin('Quando', `o usuário ${verbo} ${resto}`);
+  const frase =
+    objetivarFrase(`${m[1]} ${m[2].trim()}`) ||
+    `${m[1].toLowerCase()} ${m[2].trim()}`;
+  return passoGherkin('Quando', `o usuário ${frase}`);
+}
+
+/**
+ * Então derivado de passo Dev imperativo (lista "1 - abrir …" sem Resultado Esperado).
+ */
+function entaoAPartirDePassoDevImperativo(titulo) {
+  const t = normalizarTitulo(String(titulo || ''));
+  if (!t) return null;
+
+  const mIndicar = t.match(/(?:vai|deve)\s+indicar\s+(.+)$/i);
+  if (mIndicar) {
+    const ev = entaoVerificavelDev(`deve indicar ${mIndicar[1]}`);
+    if (ev && !fraseEhIncompleta(ev)) return `  Então ${ev}`;
+  }
+
+  const mAbrir = t.match(/^abrir\s+(.+)$/i);
+  if (mAbrir) {
+    const alvo = mAbrir[1].trim();
+    const ev =
+      entaoVerificavelDev(`deve exibir ${alvo}`) ||
+      entaoVerificavelDev(`o sistema deve exibir ${alvo}`);
+    if (ev && !fraseEhIncompleta(ev)) return `  Então ${ev}`;
+  }
+
+  if (/\b(delet|delete|remov|exclu)\w*/i.test(t)) {
+    const ev =
+      entaoVerificavelDev('a anotação deve ser removida com sucesso') ||
+      'a anotação deve ser removida com sucesso';
+    if (ev && !fraseEhIncompleta(ev)) return `  Então ${ev}`;
+  }
+
+  const mClicar = t.match(/^clicar\s+(?:em\s+)?(.+)$/i);
+  if (mClicar && !/(?:vai|deve)\s+indicar/i.test(t)) {
+    const alvo = mClicar[1].trim();
+    const ev = entaoVerificavelDev(`deve concluir a ação em ${alvo}`);
+    if (ev && !fraseEhIncompleta(ev)) return `  Então ${ev}`;
+  }
+
+  const ev = entaoVerificavelDev(t);
+  if (ev && !fraseEhIncompleta(ev)) return `  Então ${ev}`;
+
+  return null;
 }
 
 /** Lista numerada Dev: "Realizar X, Após a geração, alterar Y, realizar novamente Z, deverá …". */
@@ -2440,6 +2499,9 @@ function cenariosQaAPartirDoDev(bloco, ctx, nomeFuncionalidade) {
   let entao = entaoParaBlocoDev(ctx, textoDev);
   if (!entao && !formatoDevEstruturado) {
     entao = entaoDoContexto(ctx, textoDev);
+  }
+  if (!entao && bloco.title) {
+    entao = entaoAPartirDePassoDevImperativo(bloco.title);
   }
   if (!entao) return [];
 
@@ -2992,6 +3054,7 @@ module.exports = {
   objetivarFraseDev,
   quandoAPartirDeAssertivoDev,
   quandoAPartirDeDescricaoDev,
+  entaoAPartirDePassoDevImperativo,
   corpoTemFormatoGwtDev,
   parseSecoesGwtDev,
   montarPassosDeSecoesGwt,
