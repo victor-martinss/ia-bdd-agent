@@ -410,6 +410,14 @@ async function tick() {
 }
 
 async function main() {
+  const { terminateDuplicatePollInstances } = require('./src/utils/poll-single-instance');
+  const { killed } = terminateDuplicatePollInstances();
+  if (killed.length) {
+    console.warn(
+      `${logTimestampBr()} [poll] ${killed.length} instância(s) duplicada(s) encerrada(s): PID ${killed.join(', ')}`
+    );
+  }
+
   const intervalMs = resolvePollIntervalMs();
   console.log('ia-bdd-agent — fila QA (alertas visuais + geração imediata)');
   console.log(
